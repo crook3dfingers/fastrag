@@ -20,6 +20,7 @@ serde_json = "1"
 [features]
 default = ["pdf", "html", "markdown", "csv", "text"]
 pdf = ["dep:fastrag-pdf"]
+pdf-parallel = ["pdf", "fastrag-pdf/parallel"]
 html = ["dep:fastrag-html"]
 markdown = ["dep:fastrag-markdown"]
 csv = ["dep:fastrag-csv"]

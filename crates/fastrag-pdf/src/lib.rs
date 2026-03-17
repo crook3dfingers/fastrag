@@ -1,9 +1,71 @@
 use fastrag_core::{
     Document, Element, ElementKind, FastRagError, FileFormat, Metadata, Parser, SourceInfo,
 };
+use pdf::object::Resolve;
+
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
 
 /// PDF parser using the `pdf` crate.
 pub struct PdfParser;
+
+fn extract_page_elements(
+    page: &pdf::object::Page,
+    resolver: &impl Resolve,
+    page_num: u32,
+) -> Result<Vec<Element>, FastRagError> {
+    let ops = page
+        .contents
+        .as_ref()
+        .and_then(|content| content.operations(resolver).ok())
+        .unwrap_or_default();
+
+    let mut page_text = String::with_capacity(ops.len() * 20);
+
+    for op in &ops {
+        match op {
+            pdf::content::Op::TextDraw { text } => {
+                if let Ok(s) = text.to_string() {
+                    page_text.push_str(&s);
+                }
+            }
+            pdf::content::Op::TextDrawAdjusted { array } => {
+                for item in array {
+                    if let pdf::content::TextDrawAdjusted::Text(t) = item
+                        && let Ok(s) = t.to_string()
+                    {
+                        page_text.push_str(&s);
+                    }
+                }
+            }
+            pdf::content::Op::TextNewline => {
+                page_text.push('\n');
+            }
+            pdf::content::Op::MoveTextPosition { translation } => {
+                if translation.y.abs() > 1.0 && !page_text.is_empty() {
+                    page_text.push('\n');
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if page_text.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut elements = Vec::new();
+    for para in page_text.split("\n\n") {
+        let trimmed = para.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        elements.push(
+            Element::new(ElementKind::Paragraph, trimmed).with_page(page_num as usize + 1),
+        );
+    }
+    Ok(elements)
+}
 
 impl Parser for PdfParser {
     fn supported_formats(&self) -> &[FileFormat] {
@@ -14,7 +76,7 @@ impl Parser for PdfParser {
         let mut metadata = Metadata::new(source.format);
         metadata.source_file = source.filename.clone();
 
-        let pdf = pdf::file::FileOptions::uncached()
+        let pdf = pdf::file::FileOptions::cached()
             .load(input)
             .map_err(|e| FastRagError::Parse {
                 format: FileFormat::Pdf,
@@ -40,62 +102,25 @@ impl Parser for PdfParser {
         }
 
         let resolver = pdf.resolver();
-        let mut elements = Vec::new();
+        let page_range: Vec<u32> = (0..num_pages).collect();
 
-        for page_num in 0..num_pages {
-            let page = pdf.get_page(page_num).map_err(|e| FastRagError::Parse {
+        let process_page = |&pn: &u32| -> Result<Vec<Element>, FastRagError> {
+            let page = pdf.get_page(pn).map_err(|e| FastRagError::Parse {
                 format: FileFormat::Pdf,
-                message: format!("page {}: {}", page_num + 1, e),
+                message: format!("page {}: {}", pn + 1, e),
             })?;
+            extract_page_elements(&page, &resolver, pn)
+        };
 
-            let mut page_text = String::new();
+        #[cfg(feature = "parallel")]
+        let page_results: Result<Vec<Vec<Element>>, FastRagError> =
+            page_range.par_iter().map(process_page).collect();
 
-            if let Some(ref content) = page.contents
-                && let Ok(ops) = content.operations(&resolver)
-            {
-                for op in &ops {
-                    match op {
-                        pdf::content::Op::TextDraw { text } => {
-                            if let Ok(s) = text.to_string() {
-                                page_text.push_str(&s);
-                            }
-                        }
-                        pdf::content::Op::TextDrawAdjusted { array } => {
-                            for item in array {
-                                if let pdf::content::TextDrawAdjusted::Text(t) = item
-                                    && let Ok(s) = t.to_string()
-                                {
-                                    page_text.push_str(&s);
-                                }
-                            }
-                        }
-                        pdf::content::Op::TextNewline => {
-                            page_text.push('\n');
-                        }
-                        pdf::content::Op::MoveTextPosition { translation } => {
-                            if translation.y.abs() > 1.0 && !page_text.is_empty() {
-                                page_text.push('\n');
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
+        #[cfg(not(feature = "parallel"))]
+        let page_results: Result<Vec<Vec<Element>>, FastRagError> =
+            page_range.iter().map(process_page).collect();
 
-            if page_text.trim().is_empty() {
-                continue;
-            }
-
-            for para in page_text.split("\n\n") {
-                let trimmed = para.trim();
-                if trimmed.is_empty() {
-                    continue;
-                }
-                elements.push(
-                    Element::new(ElementKind::Paragraph, trimmed).with_page(page_num as usize + 1),
-                );
-            }
-        }
+        let elements: Vec<Element> = page_results?.into_iter().flatten().collect();
 
         Ok(Document { metadata, elements })
     }
@@ -128,6 +153,50 @@ mod tests {
         let source = SourceInfo::new(FileFormat::Pdf);
         let result = parser.parse(&[], &source);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn multi_page_pdf_preserves_content_and_order() {
+        let pdf_bytes = include_bytes!("../../../tests/fixtures/sample.pdf");
+        let parser = PdfParser;
+        let source = SourceInfo::new(FileFormat::Pdf).with_filename("sample.pdf");
+        let doc = parser.parse(pdf_bytes, &source).unwrap();
+
+        assert_eq!(doc.metadata.page_count, Some(3));
+
+        let page1: Vec<_> = doc.elements.iter().filter(|e| e.page == Some(1)).collect();
+        let page2: Vec<_> = doc.elements.iter().filter(|e| e.page == Some(2)).collect();
+        let page3: Vec<_> = doc.elements.iter().filter(|e| e.page == Some(3)).collect();
+
+        assert!(page1[0].text.contains("Page one"), "got: {}", page1[0].text);
+        assert!(page2[0].text.contains("Page two"), "got: {}", page2[0].text);
+        assert!(page3[0].text.contains("Page three"), "got: {}", page3[0].text);
+    }
+
+    #[test]
+    fn dense_page_text_fully_extracted() {
+        let pdf_bytes = include_bytes!("../../../tests/fixtures/sample.pdf");
+        let parser = PdfParser;
+        let source = SourceInfo::new(FileFormat::Pdf);
+        let doc = parser.parse(pdf_bytes, &source).unwrap();
+
+        let total_len: usize = doc.elements.iter().map(|e| e.text.len()).sum();
+        assert!(total_len > 30, "total text length was only {total_len}");
+    }
+
+    #[test]
+    fn page_order_monotonically_increasing() {
+        let pdf_bytes = include_bytes!("../../../tests/fixtures/sample.pdf");
+        let parser = PdfParser;
+        let source = SourceInfo::new(FileFormat::Pdf);
+        let doc = parser.parse(pdf_bytes, &source).unwrap();
+
+        let pages: Vec<usize> = doc.elements.iter().filter_map(|e| e.page).collect();
+        for w in pages.windows(2) {
+            assert!(w[0] <= w[1], "order violated: {} after {}", w[1], w[0]);
+        }
+        let unique: std::collections::HashSet<_> = pages.iter().collect();
+        assert!(unique.len() >= 2, "expected elements from ≥2 pages");
     }
 
     #[test]
