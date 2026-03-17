@@ -1,0 +1,17 @@
+[package]
+name = "fastrag-cli"
+description = "CLI for FastRAG document parser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "fastrag"
+path = "src/main.rs"
+
+[dependencies]
+fastrag.workspace = true
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+indicatif = "0.17"

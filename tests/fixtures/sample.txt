@@ -1,0 +1,13 @@
+INTRODUCTION
+
+This is a sample text document for testing the FastRAG parser.
+It contains multiple paragraphs and heading-like lines.
+
+Summary:
+
+The FastRAG parser should correctly identify titles, headings,
+and paragraphs within plain text files.
+
+CONCLUSION
+
+FastRAG successfully parsed this document.

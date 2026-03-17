@@ -1,0 +1,11 @@
+[package]
+name = "fastrag-csv"
+description = "CSV parser for FastRAG"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+fastrag-core.workspace = true
+csv = "1"
