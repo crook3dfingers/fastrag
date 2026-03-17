@@ -60,9 +60,8 @@ fn extract_page_elements(
         if trimmed.is_empty() {
             continue;
         }
-        elements.push(
-            Element::new(ElementKind::Paragraph, trimmed).with_page(page_num as usize + 1),
-        );
+        elements
+            .push(Element::new(ElementKind::Paragraph, trimmed).with_page(page_num as usize + 1));
     }
     Ok(elements)
 }
@@ -76,12 +75,13 @@ impl Parser for PdfParser {
         let mut metadata = Metadata::new(source.format);
         metadata.source_file = source.filename.clone();
 
-        let pdf = pdf::file::FileOptions::cached()
-            .load(input)
-            .map_err(|e| FastRagError::Parse {
-                format: FileFormat::Pdf,
-                message: e.to_string(),
-            })?;
+        let pdf =
+            pdf::file::FileOptions::cached()
+                .load(input)
+                .map_err(|e| FastRagError::Parse {
+                    format: FileFormat::Pdf,
+                    message: e.to_string(),
+                })?;
 
         let num_pages = pdf.num_pages();
         metadata.page_count = Some(num_pages as usize);
@@ -170,7 +170,11 @@ mod tests {
 
         assert!(page1[0].text.contains("Page one"), "got: {}", page1[0].text);
         assert!(page2[0].text.contains("Page two"), "got: {}", page2[0].text);
-        assert!(page3[0].text.contains("Page three"), "got: {}", page3[0].text);
+        assert!(
+            page3[0].text.contains("Page three"),
+            "got: {}",
+            page3[0].text
+        );
     }
 
     #[test]
