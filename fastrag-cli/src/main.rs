@@ -3,10 +3,10 @@ mod args;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use args::{Cli, Command, OutputFormatArg};
+use args::{ChunkStrategyArg, Cli, Command, OutputFormatArg};
 use clap::Parser;
 use fastrag::registry::ParserRegistry;
-use fastrag::{FileFormat, OutputFormat};
+use fastrag::{ChunkingStrategy, FileFormat, OutputFormat};
 use indicatif::{ProgressBar, ProgressStyle};
 use tokio::sync::Semaphore;
 
@@ -20,6 +20,9 @@ async fn main() {
             format,
             output,
             workers,
+            chunk_strategy,
+            chunk_size,
+            detect_language,
         } => {
             let output_format = match format {
                 OutputFormatArg::Markdown => OutputFormat::Markdown,
@@ -27,11 +30,35 @@ async fn main() {
                 OutputFormatArg::Text => OutputFormat::PlainText,
             };
 
+            let chunking = match chunk_strategy {
+                ChunkStrategyArg::None => None,
+                ChunkStrategyArg::Basic => Some(ChunkingStrategy::Basic {
+                    max_characters: chunk_size,
+                }),
+                ChunkStrategyArg::ByTitle => Some(ChunkingStrategy::ByTitle {
+                    max_characters: chunk_size,
+                }),
+            };
+
             let path = Path::new(&path);
             if path.is_file() {
-                parse_single_file(path, output_format, output.as_deref());
+                parse_single_file(
+                    path,
+                    output_format,
+                    output.as_deref(),
+                    chunking.as_ref(),
+                    detect_language,
+                );
             } else if path.is_dir() {
-                parse_directory(path, output_format, output.as_deref(), workers).await;
+                parse_directory(
+                    path,
+                    output_format,
+                    output.as_deref(),
+                    workers,
+                    chunking,
+                    detect_language,
+                )
+                .await;
             } else {
                 eprintln!("Error: '{}' is not a file or directory", path.display());
                 std::process::exit(1);
@@ -47,11 +74,27 @@ async fn main() {
     }
 }
 
-fn parse_single_file(path: &Path, output_format: OutputFormat, output_dir: Option<&str>) {
+fn parse_single_file(
+    path: &Path,
+    output_format: OutputFormat,
+    output_dir: Option<&str>,
+    chunking: Option<&ChunkingStrategy>,
+    detect_language: bool,
+) {
     let registry = ParserRegistry::default();
     match registry.parse_file(path) {
-        Ok(doc) => {
-            let rendered = render_document(&doc, output_format);
+        Ok(mut doc) => {
+            #[cfg(feature = "language-detection")]
+            if detect_language {
+                doc.detect_language();
+            }
+
+            let rendered = if let Some(strategy) = chunking {
+                let chunks = doc.chunk(strategy);
+                render_chunks(&chunks, output_format)
+            } else {
+                render_document(&doc, output_format)
+            };
             if let Some(dir) = output_dir {
                 let out_path = output_path(path, dir, output_format);
                 if let Some(parent) = out_path.parent() {
@@ -78,6 +121,8 @@ async fn parse_directory(
     output_format: OutputFormat,
     output_dir: Option<&str>,
     workers: usize,
+    _chunking: Option<ChunkingStrategy>,
+    _detect_language: bool,
 ) {
     let files = collect_files(dir);
     if files.is_empty() {
@@ -156,7 +201,19 @@ fn collect_files(dir: &Path) -> Vec<PathBuf> {
                     }
                     if matches!(
                         ext.to_lowercase().as_str(),
-                        "pdf" | "html" | "htm" | "md" | "markdown" | "csv" | "txt" | "text" | "log"
+                        "pdf"
+                            | "html"
+                            | "htm"
+                            | "md"
+                            | "markdown"
+                            | "csv"
+                            | "txt"
+                            | "text"
+                            | "log"
+                            | "docx"
+                            | "pptx"
+                            | "xlsx"
+                            | "xml"
                     ) {
                         files.push(path);
                     }
@@ -167,6 +224,39 @@ fn collect_files(dir: &Path) -> Vec<PathBuf> {
         }
     }
     files
+}
+
+fn render_chunks(chunks: &[fastrag::Chunk], format: OutputFormat) -> String {
+    let mut out = String::new();
+    for chunk in chunks {
+        match format {
+            OutputFormat::Markdown => {
+                if let Some(ref section) = chunk.section {
+                    out.push_str(&format!("## {section}\n\n"));
+                }
+                out.push_str(&chunk.text);
+                out.push_str("\n\n---\n\n");
+            }
+            OutputFormat::Json => {
+                out.push_str(&format!(
+                    "{{\"index\":{},\"char_count\":{},\"section\":{},\"text\":{}}}\n",
+                    chunk.index,
+                    chunk.char_count,
+                    chunk
+                        .section
+                        .as_ref()
+                        .map(|s| format!("\"{}\"", s.replace('"', "\\\"")))
+                        .unwrap_or_else(|| "null".to_string()),
+                    serde_json::to_string(&chunk.text).unwrap_or_default()
+                ));
+            }
+            OutputFormat::PlainText => {
+                out.push_str(&chunk.text);
+                out.push_str("\n\n");
+            }
+        }
+    }
+    out.trim_end().to_string()
 }
 
 fn render_document(doc: &fastrag::Document, format: OutputFormat) -> String {
@@ -255,7 +345,7 @@ mod tests {
     fn collect_files_fixtures() {
         let fixtures = format!("{}/../tests/fixtures", env!("CARGO_MANIFEST_DIR"));
         let files = collect_files(Path::new(&fixtures));
-        assert_eq!(files.len(), 5); // txt, csv, md, html, pdf
+        assert_eq!(files.len(), 9); // txt, csv, md, html, pdf, xml, xlsx, docx, pptx
     }
 
     #[test]

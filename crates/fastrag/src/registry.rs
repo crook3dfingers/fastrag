@@ -29,6 +29,18 @@ impl Default for ParserRegistry {
         #[cfg(feature = "pdf")]
         registry.register(Box::new(fastrag_pdf::PdfParser));
 
+        #[cfg(feature = "xml")]
+        registry.register(Box::new(fastrag_xml::XmlParser));
+
+        #[cfg(feature = "xlsx")]
+        registry.register(Box::new(fastrag_xlsx::XlsxParser));
+
+        #[cfg(feature = "docx")]
+        registry.register(Box::new(fastrag_docx::DocxParser));
+
+        #[cfg(feature = "pptx")]
+        registry.register(Box::new(fastrag_pptx::PptxParser));
+
         registry
     }
 }
@@ -152,8 +164,8 @@ mod tests {
     }
 
     #[test]
-    fn default_registry_has_5_formats() {
+    fn default_registry_has_9_formats() {
         let reg = ParserRegistry::default();
-        assert_eq!(reg.supported_formats().len(), 5);
+        assert_eq!(reg.supported_formats().len(), 9);
     }
 }

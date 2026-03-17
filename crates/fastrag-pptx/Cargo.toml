@@ -1,0 +1,12 @@
+[package]
+name = "fastrag-pptx"
+description = "PPTX parser for FastRAG"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+fastrag-core.workspace = true
+zip = "2"
+quick-xml = "0.37"

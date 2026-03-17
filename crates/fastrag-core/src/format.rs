@@ -12,6 +12,10 @@ pub enum FileFormat {
     Markdown,
     Csv,
     Text,
+    Docx,
+    Pptx,
+    Xlsx,
+    Xml,
     Unknown,
 }
 
@@ -23,6 +27,10 @@ impl fmt::Display for FileFormat {
             Self::Markdown => write!(f, "Markdown"),
             Self::Csv => write!(f, "CSV"),
             Self::Text => write!(f, "Text"),
+            Self::Docx => write!(f, "DOCX"),
+            Self::Pptx => write!(f, "PPTX"),
+            Self::Xlsx => write!(f, "XLSX"),
+            Self::Xml => write!(f, "XML"),
             Self::Unknown => write!(f, "Unknown"),
         }
     }
@@ -38,12 +46,24 @@ impl FileFormat {
                 "md" | "markdown" | "mkd" => return Self::Markdown,
                 "csv" | "tsv" => return Self::Csv,
                 "txt" | "text" | "log" => return Self::Text,
+                "docx" => return Self::Docx,
+                "pptx" => return Self::Pptx,
+                "xlsx" => return Self::Xlsx,
+                "xml" => return Self::Xml,
                 _ => {}
             }
         }
 
         if first_bytes.starts_with(b"%PDF") {
             return Self::Pdf;
+        }
+
+        if !first_bytes.is_empty() && first_bytes.len() >= 5 {
+            let start = String::from_utf8_lossy(&first_bytes[..first_bytes.len().min(512)]);
+            let trimmed = start.trim_start();
+            if trimmed.starts_with("<?xml") {
+                return Self::Xml;
+            }
         }
 
         if !first_bytes.is_empty() {
@@ -62,7 +82,17 @@ impl FileFormat {
 
     /// List all known formats.
     pub fn all_known() -> &'static [FileFormat] {
-        &[Self::Pdf, Self::Html, Self::Markdown, Self::Csv, Self::Text]
+        &[
+            Self::Pdf,
+            Self::Html,
+            Self::Markdown,
+            Self::Csv,
+            Self::Text,
+            Self::Docx,
+            Self::Pptx,
+            Self::Xlsx,
+            Self::Xml,
+        ]
     }
 }
 
@@ -232,8 +262,68 @@ mod tests {
     // --- all_known tests ---
 
     #[test]
+    fn detect_docx_extension() {
+        assert_eq!(
+            FileFormat::detect(Path::new("doc.docx"), &[]),
+            FileFormat::Docx
+        );
+    }
+
+    #[test]
+    fn detect_pptx_extension() {
+        assert_eq!(
+            FileFormat::detect(Path::new("slides.pptx"), &[]),
+            FileFormat::Pptx
+        );
+    }
+
+    #[test]
+    fn detect_xlsx_extension() {
+        assert_eq!(
+            FileFormat::detect(Path::new("data.xlsx"), &[]),
+            FileFormat::Xlsx
+        );
+    }
+
+    #[test]
+    fn detect_xml_extension() {
+        assert_eq!(
+            FileFormat::detect(Path::new("config.xml"), &[]),
+            FileFormat::Xml
+        );
+    }
+
+    #[test]
+    fn detect_xml_magic_bytes() {
+        assert_eq!(
+            FileFormat::detect(Path::new("noext"), b"<?xml version=\"1.0\"?>"),
+            FileFormat::Xml
+        );
+    }
+
+    #[test]
+    fn display_docx() {
+        assert_eq!(format!("{}", FileFormat::Docx), "DOCX");
+    }
+
+    #[test]
+    fn display_pptx() {
+        assert_eq!(format!("{}", FileFormat::Pptx), "PPTX");
+    }
+
+    #[test]
+    fn display_xlsx() {
+        assert_eq!(format!("{}", FileFormat::Xlsx), "XLSX");
+    }
+
+    #[test]
+    fn display_xml() {
+        assert_eq!(format!("{}", FileFormat::Xml), "XML");
+    }
+
+    #[test]
     fn all_known_length() {
-        assert_eq!(FileFormat::all_known().len(), 5);
+        assert_eq!(FileFormat::all_known().len(), 9);
     }
 
     #[test]
@@ -244,6 +334,10 @@ mod tests {
         assert!(known.contains(&FileFormat::Markdown));
         assert!(known.contains(&FileFormat::Csv));
         assert!(known.contains(&FileFormat::Text));
+        assert!(known.contains(&FileFormat::Docx));
+        assert!(known.contains(&FileFormat::Pptx));
+        assert!(known.contains(&FileFormat::Xlsx));
+        assert!(known.contains(&FileFormat::Xml));
     }
 
     // --- SourceInfo tests ---

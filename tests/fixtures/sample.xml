@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document>
+  <title>Sample XML Document</title>
+  <p>This is the first paragraph of the sample XML document.</p>
+  <h2>Section One</h2>
+  <p>Content under section one with some details.</p>
+  <table>
+    <tr><th>Name</th><th>Value</th></tr>
+    <tr><td>Alpha</td><td>100</td></tr>
+    <tr><td>Beta</td><td>200</td></tr>
+  </table>
+  <code>print("hello world")</code>
+  <ul>
+    <li>First item</li>
+    <li>Second item</li>
+  </ul>
+</document>

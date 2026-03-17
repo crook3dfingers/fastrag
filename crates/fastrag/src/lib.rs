@@ -6,14 +6,22 @@ pub use fastrag_core::*;
 // Re-export parsers when feature-enabled
 #[cfg(feature = "csv")]
 pub use fastrag_csv::CsvParser;
+#[cfg(feature = "docx")]
+pub use fastrag_docx::DocxParser;
 #[cfg(feature = "html")]
 pub use fastrag_html::HtmlParser;
 #[cfg(feature = "markdown")]
 pub use fastrag_markdown::MarkdownParser;
 #[cfg(feature = "pdf")]
 pub use fastrag_pdf::PdfParser;
+#[cfg(feature = "pptx")]
+pub use fastrag_pptx::PptxParser;
 #[cfg(feature = "text")]
 pub use fastrag_text::TextParser;
+#[cfg(feature = "xlsx")]
+pub use fastrag_xlsx::XlsxParser;
+#[cfg(feature = "xml")]
+pub use fastrag_xml::XmlParser;
 
 use registry::ParserRegistry;
 use std::path::Path;

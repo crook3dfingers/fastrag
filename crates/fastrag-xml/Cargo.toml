@@ -1,0 +1,11 @@
+[package]
+name = "fastrag-xml"
+description = "XML parser for FastRAG"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+fastrag-core.workspace = true
+quick-xml = "0.37"

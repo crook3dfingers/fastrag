@@ -26,6 +26,18 @@ pub enum Command {
         /// Number of parallel workers
         #[arg(short = 'j', long, default_value = "4")]
         workers: usize,
+
+        /// Chunking strategy (none, basic, by-title)
+        #[arg(long, default_value = "none")]
+        chunk_strategy: ChunkStrategyArg,
+
+        /// Maximum characters per chunk
+        #[arg(long, default_value = "1000")]
+        chunk_size: usize,
+
+        /// Detect document language
+        #[arg(long)]
+        detect_language: bool,
     },
 
     /// List supported formats
@@ -37,4 +49,11 @@ pub enum OutputFormatArg {
     Markdown,
     Json,
     Text,
+}
+
+#[derive(Clone, ValueEnum, PartialEq)]
+pub enum ChunkStrategyArg {
+    None,
+    Basic,
+    ByTitle,
 }
