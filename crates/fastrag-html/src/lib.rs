@@ -21,7 +21,6 @@ impl Parser for HtmlParser {
 
         let html = Html::parse_document(&text);
 
-        // Extract title from <title> tag
         if let Some(title_el) = Selector::parse("title")
             .ok()
             .and_then(|s| html.select(&s).next())
@@ -35,7 +34,6 @@ impl Parser for HtmlParser {
 
         let mut elements = Vec::new();
 
-        // Content selectors in order of priority
         let content_selectors = [
             ("h1", ElementKind::Title, 0u8),
             ("h2", ElementKind::Heading, 1),
@@ -45,17 +43,14 @@ impl Parser for HtmlParser {
             ("h6", ElementKind::Heading, 5),
         ];
 
-        // Try to find a main content area
         let body_selector = Selector::parse("article, main, [role='main'], .content, .post, body")
             .expect("valid selector");
 
         if let Some(body) = html.select(&body_selector).next() {
-            // Process all descendant elements in document order
             for node in body.descendants() {
                 if let Some(el) = node.value().as_element() {
                     let tag = el.name();
 
-                    // Skip non-content tags
                     if matches!(
                         tag,
                         "script" | "style" | "nav" | "header" | "footer" | "noscript" | "svg"
@@ -71,11 +66,10 @@ impl Parser for HtmlParser {
                         .trim()
                         .to_string();
 
-                    if text.is_empty() {
+                    if text.is_empty() && tag != "table" && tag != "hr" {
                         continue;
                     }
 
-                    // Map HTML tags to element kinds
                     let mut matched = false;
                     for (selector_tag, kind, depth) in &content_selectors {
                         if tag == *selector_tag {
@@ -91,7 +85,6 @@ impl Parser for HtmlParser {
                                 elements.push(Element::new(ElementKind::Paragraph, &text));
                             }
                             "pre" | "code" => {
-                                // Get full text including nested elements
                                 let full_text: String = scraper::ElementRef::wrap(node)
                                     .map(|er| er.text().collect::<String>())
                                     .unwrap_or(text.clone());
@@ -178,26 +171,64 @@ mod tests {
     }
 
     #[test]
-    fn test_basic_html() {
-        let doc = parse_html(
-            "<html><head><title>Test Page</title></head>\
-             <body><h1>Hello</h1><p>World</p></body></html>",
-        );
-        assert_eq!(doc.metadata.title, Some("Test Page".to_string()));
-        assert!(
-            doc.elements
-                .iter()
-                .any(|e| e.kind == ElementKind::Title && e.text == "Hello")
-        );
-        assert!(
-            doc.elements
-                .iter()
-                .any(|e| e.kind == ElementKind::Paragraph && e.text == "World")
-        );
+    fn supported_formats_returns_html() {
+        assert_eq!(HtmlParser.supported_formats(), &[FileFormat::Html]);
     }
 
     #[test]
-    fn test_strips_script_style() {
+    fn title_tag_sets_metadata() {
+        let doc =
+            parse_html("<html><head><title>My Page</title></head><body><p>Hi</p></body></html>");
+        assert_eq!(doc.metadata.title, Some("My Page".to_string()));
+    }
+
+    #[test]
+    fn h1_becomes_title_depth0() {
+        let doc = parse_html("<html><body><h1>Hello</h1></body></html>");
+        let el = doc
+            .elements
+            .iter()
+            .find(|e| e.kind == ElementKind::Title)
+            .unwrap();
+        assert_eq!(el.text, "Hello");
+        assert_eq!(el.depth, 0);
+    }
+
+    #[test]
+    fn h2_becomes_heading_depth1() {
+        let doc = parse_html("<html><body><h2>Section</h2></body></html>");
+        let el = doc
+            .elements
+            .iter()
+            .find(|e| e.kind == ElementKind::Heading)
+            .unwrap();
+        assert_eq!(el.depth, 1);
+    }
+
+    #[test]
+    fn h3_becomes_heading_depth2() {
+        let doc = parse_html("<html><body><h3>Sub</h3></body></html>");
+        let el = doc
+            .elements
+            .iter()
+            .find(|e| e.kind == ElementKind::Heading)
+            .unwrap();
+        assert_eq!(el.depth, 2);
+    }
+
+    #[test]
+    fn p_becomes_paragraph() {
+        let doc = parse_html("<html><body><p>Content text</p></body></html>");
+        let el = doc
+            .elements
+            .iter()
+            .find(|e| e.kind == ElementKind::Paragraph)
+            .unwrap();
+        assert_eq!(el.text, "Content text");
+    }
+
+    #[test]
+    fn script_and_style_stripped() {
         let doc = parse_html(
             "<html><body>\
              <script>alert('xss')</script>\
@@ -218,20 +249,74 @@ mod tests {
     }
 
     #[test]
-    fn test_heading_levels() {
-        let doc = parse_html(
-            "<html><body>\
-             <h1>H1</h1><h2>H2</h2><h3>H3</h3>\
-             </body></html>",
-        );
-        let headings: Vec<_> = doc
+    fn li_becomes_list_item() {
+        let doc =
+            parse_html("<html><body><ul><li>Item one</li><li>Item two</li></ul></body></html>");
+        let items: Vec<_> = doc
             .elements
             .iter()
-            .filter(|e| e.kind == ElementKind::Title || e.kind == ElementKind::Heading)
+            .filter(|e| e.kind == ElementKind::ListItem)
             .collect();
-        assert_eq!(headings.len(), 3);
-        assert_eq!(headings[0].depth, 0); // h1
-        assert_eq!(headings[1].depth, 1); // h2
-        assert_eq!(headings[2].depth, 2); // h3
+        assert!(items.len() >= 2);
+        assert_eq!(items[0].text, "Item one");
+    }
+
+    #[test]
+    fn pre_code_becomes_code() {
+        let doc = parse_html("<html><body><pre><code>let x = 1;</code></pre></body></html>");
+        assert!(
+            doc.elements
+                .iter()
+                .any(|e| e.kind == ElementKind::Code && e.text.contains("let x = 1;"))
+        );
+    }
+
+    #[test]
+    fn table_becomes_table_element() {
+        let doc = parse_html(
+            "<html><body><table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table></body></html>",
+        );
+        let el = doc
+            .elements
+            .iter()
+            .find(|e| e.kind == ElementKind::Table)
+            .unwrap();
+        assert!(el.text.contains("| A |"));
+        assert!(el.text.contains("| 1 |"));
+    }
+
+    #[test]
+    fn blockquote_becomes_blockquote() {
+        let doc = parse_html("<html><body><blockquote>Wise words</blockquote></body></html>");
+        assert!(
+            doc.elements
+                .iter()
+                .any(|e| e.kind == ElementKind::BlockQuote && e.text.contains("Wise words"))
+        );
+    }
+
+    #[test]
+    fn invalid_utf8_returns_encoding_error() {
+        let parser = HtmlParser;
+        let source = SourceInfo::new(FileFormat::Html);
+        let bad_bytes: &[u8] = &[0xFF, 0xFE, 0x80, 0x81];
+        let result = parser.parse(bad_bytes, &source);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            FastRagError::Encoding(_) => {}
+            other => panic!("expected Encoding error, got: {other}"),
+        }
+    }
+
+    #[test]
+    fn prefers_main_content_area() {
+        let doc = parse_html(
+            "<html><body>\
+             <nav><a>Home</a></nav>\
+             <main><h1>Title</h1><p>Main content</p></main>\
+             <footer><p>Footer</p></footer>\
+             </body></html>",
+        );
+        assert!(doc.elements.iter().any(|e| e.text == "Main content"));
     }
 }

@@ -39,7 +39,6 @@ impl Parser for TextParser {
             elements.push(classify_block(&current_block));
         }
 
-        // Use first Title or Heading as document title
         for el in &elements {
             if el.kind == ElementKind::Title || el.kind == ElementKind::Heading {
                 let mut meta = metadata.clone();
@@ -58,14 +57,12 @@ impl Parser for TextParser {
 fn classify_block(block: &str) -> Element {
     let trimmed = block.trim();
 
-    // Single line, all uppercase, reasonably short → Title/Heading
     if !trimmed.contains('\n') && trimmed.len() <= 100 {
         let alpha_chars: Vec<char> = trimmed.chars().filter(|c| c.is_alphabetic()).collect();
         if !alpha_chars.is_empty() && alpha_chars.iter().all(|c| c.is_uppercase()) {
             return Element::new(ElementKind::Title, trimmed);
         }
 
-        // Short line ending with colon → Heading
         if trimmed.len() <= 80 && trimmed.ends_with(':') {
             return Element::new(ElementKind::Heading, trimmed.trim_end_matches(':')).with_depth(1);
         }
@@ -85,43 +82,90 @@ mod tests {
     }
 
     #[test]
-    fn test_basic_paragraphs() {
+    fn supported_formats_returns_text() {
+        assert_eq!(TextParser.supported_formats(), &[FileFormat::Text]);
+    }
+
+    #[test]
+    fn two_paragraphs_separated_by_blank_line() {
         let doc = parse_text("First paragraph.\n\nSecond paragraph.");
         assert_eq!(doc.elements.len(), 2);
         assert_eq!(doc.elements[0].kind, ElementKind::Paragraph);
         assert_eq!(doc.elements[0].text, "First paragraph.");
+        assert_eq!(doc.elements[1].kind, ElementKind::Paragraph);
         assert_eq!(doc.elements[1].text, "Second paragraph.");
     }
 
     #[test]
-    fn test_uppercase_title() {
+    fn all_caps_line_becomes_title() {
         let doc = parse_text("INTRODUCTION\n\nSome text here.");
         assert_eq!(doc.elements[0].kind, ElementKind::Title);
         assert_eq!(doc.elements[0].text, "INTRODUCTION");
+    }
+
+    #[test]
+    fn colon_ending_line_becomes_heading() {
+        let doc = parse_text("Summary:\n\nThe results are in.");
+        assert_eq!(doc.elements[0].kind, ElementKind::Heading);
+        assert_eq!(doc.elements[0].text, "Summary");
+        assert_eq!(doc.elements[0].depth, 1);
+    }
+
+    #[test]
+    fn multiline_paragraph_joined_with_newline() {
+        let doc = parse_text("Line one\nLine two\nLine three\n\nNew paragraph.");
+        assert_eq!(doc.elements.len(), 2);
+        assert_eq!(doc.elements[0].text, "Line one\nLine two\nLine three");
+    }
+
+    #[test]
+    fn empty_input_no_elements() {
+        let doc = parse_text("");
+        assert!(doc.elements.is_empty());
+    }
+
+    #[test]
+    fn title_sets_metadata_title() {
+        let doc = parse_text("INTRODUCTION\n\nSome text.");
         assert_eq!(doc.metadata.title, Some("INTRODUCTION".to_string()));
     }
 
     #[test]
-    fn test_colon_heading() {
-        let doc = parse_text("Summary:\n\nThe results are in.");
-        assert_eq!(doc.elements[0].kind, ElementKind::Heading);
-        assert_eq!(doc.elements[0].text, "Summary");
+    fn no_title_metadata_is_none() {
+        let doc = parse_text("Just a paragraph.\n\nAnother one.");
+        assert_eq!(doc.metadata.title, None);
     }
 
     #[test]
-    fn test_multiline_paragraph() {
-        let doc = parse_text("Line one\nLine two\nLine three\n\nNew paragraph.");
+    fn source_file_propagated() {
+        let doc = parse_text("Hello");
+        assert_eq!(doc.metadata.source_file, Some("test.txt".to_string()));
+    }
+
+    #[test]
+    fn multiple_blank_lines_no_empty_elements() {
+        let doc = parse_text("A\n\n\n\nB");
         assert_eq!(doc.elements.len(), 2);
-        assert!(
-            doc.elements[0]
-                .text
-                .contains("Line one\nLine two\nLine three")
-        );
+        assert!(doc.elements.iter().all(|e| !e.text.is_empty()));
     }
 
     #[test]
-    fn test_empty_input() {
-        let doc = parse_text("");
-        assert!(doc.elements.is_empty());
+    fn all_caps_over_100_chars_is_paragraph() {
+        let long = "A".repeat(101);
+        let doc = parse_text(&long);
+        assert_eq!(doc.elements[0].kind, ElementKind::Paragraph);
+    }
+
+    #[test]
+    fn invalid_utf8_returns_encoding_error() {
+        let parser = TextParser;
+        let source = SourceInfo::new(FileFormat::Text);
+        let bad_bytes: &[u8] = &[0xFF, 0xFE, 0x80, 0x81];
+        let result = parser.parse(bad_bytes, &source);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            FastRagError::Encoding(_) => {}
+            other => panic!("expected Encoding error, got: {other}"),
+        }
     }
 }

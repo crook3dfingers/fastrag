@@ -148,14 +148,12 @@ fn collect_files(dir: &Path) -> Vec<PathBuf> {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_file() {
-                // Check if we can detect a known format
                 if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
                     let format = FileFormat::detect(&path, &[]);
                     if format != FileFormat::Unknown {
                         files.push(path);
                         continue;
                     }
-                    // Also accept common extensions directly
                     if matches!(
                         ext.to_lowercase().as_str(),
                         "pdf" | "html" | "htm" | "md" | "markdown" | "csv" | "txt" | "text" | "log"
@@ -187,8 +185,85 @@ fn output_path(input: &Path, output_dir: &str, format: OutputFormat) -> PathBuf 
         OutputFormat::Json => "json",
         OutputFormat::PlainText => "txt",
     };
-    // Use original filename with source extension preserved to avoid collisions
-    // e.g. sample.csv -> sample.csv.md
     let filename = input.file_name().unwrap_or_default();
     PathBuf::from(output_dir).join(format!("{}.{out_ext}", filename.to_string_lossy()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fastrag::{Document, Element, ElementKind, Metadata};
+
+    fn sample_doc() -> Document {
+        let mut m = Metadata::new(FileFormat::Text);
+        m.title = Some("Title".to_string());
+        Document {
+            metadata: m,
+            elements: vec![
+                Element::new(ElementKind::Title, "Title"),
+                Element::new(ElementKind::Paragraph, "Body text."),
+            ],
+        }
+    }
+
+    #[test]
+    fn render_document_markdown() {
+        let doc = sample_doc();
+        let md = render_document(&doc, OutputFormat::Markdown);
+        assert!(md.contains("# Title"));
+    }
+
+    #[test]
+    fn render_document_json() {
+        let doc = sample_doc();
+        let json = render_document(&doc, OutputFormat::Json);
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed["elements"].is_array());
+    }
+
+    #[test]
+    fn render_document_plain_text() {
+        let doc = sample_doc();
+        let text = render_document(&doc, OutputFormat::PlainText);
+        assert!(text.contains("Title"));
+        assert!(!text.contains("# "));
+    }
+
+    #[test]
+    fn output_path_markdown() {
+        let p = output_path(Path::new("data/sample.csv"), "/out", OutputFormat::Markdown);
+        assert_eq!(p, PathBuf::from("/out/sample.csv.md"));
+    }
+
+    #[test]
+    fn output_path_json() {
+        let p = output_path(Path::new("data/sample.csv"), "/out", OutputFormat::Json);
+        assert_eq!(p, PathBuf::from("/out/sample.csv.json"));
+    }
+
+    #[test]
+    fn output_path_plain_text() {
+        let p = output_path(
+            Path::new("data/sample.csv"),
+            "/out",
+            OutputFormat::PlainText,
+        );
+        assert_eq!(p, PathBuf::from("/out/sample.csv.txt"));
+    }
+
+    #[test]
+    fn collect_files_fixtures() {
+        let fixtures = format!("{}/../tests/fixtures", env!("CARGO_MANIFEST_DIR"));
+        let files = collect_files(Path::new(&fixtures));
+        assert_eq!(files.len(), 4); // txt, csv, md, html
+    }
+
+    #[test]
+    fn collect_files_empty_dir() {
+        let dir = std::env::temp_dir().join("fastrag_test_empty_dir");
+        std::fs::create_dir_all(&dir).ok();
+        let files = collect_files(&dir);
+        assert!(files.is_empty());
+        std::fs::remove_dir(&dir).ok();
+    }
 }

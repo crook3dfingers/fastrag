@@ -34,3 +34,39 @@ cargo build --release        # Release build (binary at target/release/fastrag)
 4. Add feature flag in `crates/fastrag/Cargo.toml`
 5. Register in `ParserRegistry::default()` in `crates/fastrag/src/registry.rs`
 6. Add test fixture in `tests/fixtures/`
+
+## Development Discipline
+
+### TDD Red-Green-Refactor (Mandatory)
+
+Every piece of code written in this repo must follow TDD red-green-refactor:
+
+1. **Red** — Write a failing test first. Run `cargo test --workspace` to confirm it fails with the expected error.
+2. **Green** — Write the minimal code to make it pass. Run `cargo test --workspace` again to confirm green.
+3. **Refactor** — Clean up while keeping tests green.
+
+This is not optional. Do not write production code before writing the test that exercises it.
+
+- Unit tests go in `#[cfg(test)]` modules in the same file as the code.
+- Integration tests go in `tests/`.
+
+### No Rubber-Stamp Tests — Strictly Forbidden
+
+A rubber-stamp test is one that passes trivially without actually verifying behaviour. Forbidden patterns:
+
+- `assert!(true)` or `assert!(result.is_some())` when a concrete value can be asserted
+- Tests where every call is mocked and the only assertion checks the mock was called (no real logic exercised)
+- Tests written *after* the implementation that re-state what the code happens to return
+- Catching panics and asserting success instead of the specific error type and message
+- Tests whose assertion would still pass if the implementation were a no-op or returned a constant
+
+Every test must have at least one assertion on a **concrete value** derived from real logic, and must fail if the implementation is broken or deleted.
+
+## Skills (`.claude/skills/`)
+
+Reusable prompts that keep main-context token usage low.
+
+| Skill file | When to use |
+|---|---|
+| `ci-watcher.md` | After every `git push` — **mandatory** |
+| `doc-editor/SKILL.md` | Before every `Edit` or `Write` to a `.md` file — **mandatory** |

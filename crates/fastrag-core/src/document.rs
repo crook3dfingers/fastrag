@@ -96,3 +96,61 @@ pub enum ElementKind {
     HorizontalRule,
     Unknown,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn element_new_defaults() {
+        let el = Element::new(ElementKind::Paragraph, "hello");
+        assert_eq!(el.kind, ElementKind::Paragraph);
+        assert_eq!(el.text, "hello");
+        assert_eq!(el.depth, 0);
+        assert_eq!(el.page, None);
+        assert_eq!(el.section, None);
+        assert!(el.attributes.is_empty());
+    }
+
+    #[test]
+    fn element_with_depth() {
+        let el = Element::new(ElementKind::Heading, "h").with_depth(2);
+        assert_eq!(el.depth, 2);
+    }
+
+    #[test]
+    fn element_with_page() {
+        let el = Element::new(ElementKind::Paragraph, "p").with_page(5);
+        assert_eq!(el.page, Some(5));
+    }
+
+    #[test]
+    fn element_with_section() {
+        let el = Element::new(ElementKind::Paragraph, "p").with_section("intro");
+        assert_eq!(el.section, Some("intro".to_string()));
+    }
+
+    #[test]
+    fn element_builder_chaining() {
+        let el = Element::new(ElementKind::Code, "x = 1")
+            .with_depth(1)
+            .with_page(3)
+            .with_section("code");
+        assert_eq!(el.depth, 1);
+        assert_eq!(el.page, Some(3));
+        assert_eq!(el.section, Some("code".to_string()));
+        assert_eq!(el.text, "x = 1");
+    }
+
+    #[test]
+    fn metadata_new_defaults() {
+        let m = Metadata::new(FileFormat::Html);
+        assert_eq!(m.format, FileFormat::Html);
+        assert_eq!(m.source_file, None);
+        assert_eq!(m.title, None);
+        assert_eq!(m.author, None);
+        assert_eq!(m.page_count, None);
+        assert_eq!(m.created_at, None);
+        assert!(m.custom.is_empty());
+    }
+}

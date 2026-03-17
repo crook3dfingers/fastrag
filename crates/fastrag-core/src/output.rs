@@ -13,7 +13,6 @@ impl Document {
     pub fn to_markdown(&self) -> String {
         let mut out = String::new();
 
-        // Only emit metadata title if first element isn't already a title
         let first_is_title = self
             .elements
             .first()
@@ -101,52 +100,189 @@ mod tests {
     use crate::document::*;
     use crate::format::FileFormat;
 
-    fn sample_doc() -> Document {
+    fn doc_with(elements: Vec<Element>) -> Document {
         Document {
             metadata: Metadata::new(FileFormat::Text),
-            elements: vec![
-                Element::new(ElementKind::Title, "My Document"),
-                Element::new(ElementKind::Paragraph, "First paragraph."),
-                Element::new(ElementKind::Heading, "Section One").with_depth(1),
-                Element::new(ElementKind::Paragraph, "Second paragraph."),
-                Element::new(ElementKind::Code, "let x = 42;"),
-                Element::new(ElementKind::HorizontalRule, ""),
-                Element::new(ElementKind::BlockQuote, "A wise quote."),
-            ],
+            elements,
         }
     }
 
+    fn doc_with_title_meta(title: &str, elements: Vec<Element>) -> Document {
+        let mut m = Metadata::new(FileFormat::Text);
+        m.title = Some(title.to_string());
+        Document {
+            metadata: m,
+            elements,
+        }
+    }
+
+    // --- to_markdown ---
+
     #[test]
-    fn test_to_markdown() {
-        let doc = sample_doc();
+    fn markdown_title_renders_h1() {
+        let doc = doc_with(vec![Element::new(ElementKind::Title, "My Title")]);
         let md = doc.to_markdown();
-        assert!(md.contains("# My Document"));
-        assert!(md.contains("## Section One"));
-        assert!(md.contains("First paragraph."));
-        assert!(md.contains("```\nlet x = 42;\n```"));
-        assert!(md.contains("---"));
+        assert!(md.contains("# My Title"));
+    }
+
+    #[test]
+    fn markdown_heading_depth1_renders_h2() {
+        let doc = doc_with(vec![
+            Element::new(ElementKind::Heading, "Section").with_depth(1),
+        ]);
+        let md = doc.to_markdown();
+        assert!(md.contains("## Section"));
+    }
+
+    #[test]
+    fn markdown_heading_depth2_renders_h3() {
+        let doc = doc_with(vec![
+            Element::new(ElementKind::Heading, "Sub").with_depth(2),
+        ]);
+        let md = doc.to_markdown();
+        assert!(md.contains("### Sub"));
+    }
+
+    #[test]
+    fn markdown_paragraph_followed_by_blank_line() {
+        let doc = doc_with(vec![
+            Element::new(ElementKind::Paragraph, "Hello"),
+            Element::new(ElementKind::Paragraph, "World"),
+        ]);
+        let md = doc.to_markdown();
+        assert!(md.contains("Hello\n\nWorld"));
+    }
+
+    #[test]
+    fn markdown_code_without_language() {
+        let doc = doc_with(vec![Element::new(ElementKind::Code, "let x = 1;")]);
+        let md = doc.to_markdown();
+        assert!(md.contains("```\nlet x = 1;\n```"));
+    }
+
+    #[test]
+    fn markdown_code_with_language() {
+        let mut el = Element::new(ElementKind::Code, "fn main() {}");
+        el.attributes
+            .insert("language".to_string(), "rust".to_string());
+        let doc = doc_with(vec![el]);
+        let md = doc.to_markdown();
+        assert!(md.contains("```rust\nfn main() {}\n```"));
+    }
+
+    #[test]
+    fn markdown_blockquote_prefixed() {
+        let doc = doc_with(vec![Element::new(ElementKind::BlockQuote, "A wise quote.")]);
+        let md = doc.to_markdown();
         assert!(md.contains("> A wise quote."));
     }
 
     #[test]
-    fn test_to_json() {
-        let doc = sample_doc();
-        let json = doc.to_json().unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert!(parsed["elements"].is_array());
-        assert_eq!(parsed["elements"][0]["kind"], "title");
-        assert_eq!(parsed["metadata"]["format"], "text");
+    fn markdown_horizontal_rule() {
+        let doc = doc_with(vec![Element::new(ElementKind::HorizontalRule, "")]);
+        let md = doc.to_markdown();
+        assert!(md.contains("---"));
     }
 
     #[test]
-    fn test_to_plain_text() {
-        let doc = sample_doc();
+    fn markdown_metadata_title_suppressed_when_first_is_title() {
+        let doc = doc_with_title_meta(
+            "Meta Title",
+            vec![Element::new(ElementKind::Title, "Element Title")],
+        );
+        let md = doc.to_markdown();
+        // Should NOT contain meta title as separate heading
+        assert_eq!(md.matches("# ").count(), 1);
+        assert!(md.contains("# Element Title"));
+    }
+
+    #[test]
+    fn markdown_metadata_title_emitted_when_first_is_not_title() {
+        let doc = doc_with_title_meta(
+            "Meta Title",
+            vec![Element::new(ElementKind::Paragraph, "Some text")],
+        );
+        let md = doc.to_markdown();
+        assert!(md.contains("# Meta Title"));
+    }
+
+    // --- to_json ---
+
+    #[test]
+    fn json_round_trip_deserialize() {
+        let doc = doc_with(vec![
+            Element::new(ElementKind::Title, "T"),
+            Element::new(ElementKind::Paragraph, "P"),
+        ]);
+        let json = doc.to_json().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed["elements"].is_array());
+    }
+
+    #[test]
+    fn json_element_count_matches() {
+        let doc = doc_with(vec![
+            Element::new(ElementKind::Title, "T"),
+            Element::new(ElementKind::Paragraph, "P"),
+            Element::new(ElementKind::Code, "C"),
+        ]);
+        let json = doc.to_json().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["elements"].as_array().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn json_none_fields_absent() {
+        let doc = doc_with(vec![Element::new(ElementKind::Paragraph, "text")]);
+        let json = doc.to_json().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        // page is None and skip_serializing_if, should be absent
+        assert!(parsed["elements"][0].get("page").is_none());
+    }
+
+    #[test]
+    fn json_format_field_present() {
+        let doc = doc_with(vec![]);
+        let json = doc.to_json().unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["metadata"]["format"], "text");
+    }
+
+    // --- to_plain_text ---
+
+    #[test]
+    fn plain_text_concatenates() {
+        let doc = doc_with(vec![
+            Element::new(ElementKind::Title, "Title"),
+            Element::new(ElementKind::Paragraph, "Body"),
+        ]);
         let text = doc.to_plain_text();
-        assert!(text.contains("My Document"));
-        assert!(text.contains("First paragraph."));
-        assert!(text.contains("let x = 42;"));
-        // Should not contain markdown formatting
+        assert!(text.contains("Title"));
+        assert!(text.contains("Body"));
+    }
+
+    #[test]
+    fn plain_text_no_formatting() {
+        let doc = doc_with(vec![
+            Element::new(ElementKind::Title, "Title"),
+            Element::new(ElementKind::HorizontalRule, ""),
+            Element::new(ElementKind::BlockQuote, "Quote"),
+        ]);
+        let text = doc.to_plain_text();
         assert!(!text.contains("# "));
-        assert!(!text.contains("```"));
+        assert!(!text.contains("---"));
+        assert!(!text.contains("> "));
+    }
+
+    #[test]
+    fn plain_text_skips_empty() {
+        let doc = doc_with(vec![
+            Element::new(ElementKind::Title, "Title"),
+            Element::new(ElementKind::HorizontalRule, ""),
+            Element::new(ElementKind::Paragraph, "End"),
+        ]);
+        let text = doc.to_plain_text();
+        // HorizontalRule has empty text, should be skipped
+        assert_eq!(text, "Title\nEnd");
     }
 }

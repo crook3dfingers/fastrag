@@ -46,9 +46,6 @@ impl ParserRegistry {
     }
 
     /// Register a parser for all formats it supports.
-    /// Note: Since Box<dyn Parser> can only be stored once, this registers
-    /// for the first supported format only. Use `register_for_format` for
-    /// parsers supporting multiple formats.
     pub fn register(&mut self, parser: Box<dyn Parser>) {
         let formats: Vec<FileFormat> = parser.supported_formats().to_vec();
         if let Some(format) = formats.into_iter().next() {
@@ -85,5 +82,78 @@ impl ParserRegistry {
 
         let source = SourceInfo::new(format).with_filename(filename);
         parser.parse(data, &source)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fastrag_core::ElementKind;
+
+    #[test]
+    fn new_registry_is_empty() {
+        let reg = ParserRegistry::new();
+        assert!(reg.supported_formats().is_empty());
+    }
+
+    #[test]
+    fn register_text_parser() {
+        let mut reg = ParserRegistry::new();
+        reg.register(Box::new(fastrag_text::TextParser));
+        assert!(reg.supported_formats().contains(&FileFormat::Text));
+    }
+
+    #[test]
+    fn register_for_format() {
+        let mut reg = ParserRegistry::new();
+        reg.register_for_format(FileFormat::Text, Box::new(fastrag_text::TextParser));
+        assert!(reg.supported_formats().contains(&FileFormat::Text));
+    }
+
+    #[test]
+    fn parse_bytes_with_registered_parser() {
+        let mut reg = ParserRegistry::new();
+        reg.register(Box::new(fastrag_text::TextParser));
+        let doc = reg
+            .parse_bytes(b"Hello world", FileFormat::Text, "test.txt".to_string())
+            .unwrap();
+        assert_eq!(doc.elements[0].kind, ElementKind::Paragraph);
+        assert_eq!(doc.elements[0].text, "Hello world");
+    }
+
+    #[test]
+    fn parse_bytes_unsupported_format() {
+        let reg = ParserRegistry::new();
+        let result = reg.parse_bytes(b"data", FileFormat::Pdf, "test.pdf".to_string());
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            FastRagError::UnsupportedFormat(_) => {}
+            other => panic!("expected UnsupportedFormat, got: {other}"),
+        }
+    }
+
+    #[test]
+    fn parse_file_sample_txt() {
+        let fixtures = format!("{}/../../tests/fixtures", env!("CARGO_MANIFEST_DIR"));
+        let reg = ParserRegistry::default();
+        let doc = reg.parse_file(format!("{fixtures}/sample.txt")).unwrap();
+        assert!(!doc.elements.is_empty());
+    }
+
+    #[test]
+    fn parse_file_nonexistent() {
+        let reg = ParserRegistry::default();
+        let result = reg.parse_file("nonexistent.txt");
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            FastRagError::Io(_) => {}
+            other => panic!("expected Io error, got: {other}"),
+        }
+    }
+
+    #[test]
+    fn default_registry_has_5_formats() {
+        let reg = ParserRegistry::default();
+        assert_eq!(reg.supported_formats().len(), 5);
     }
 }

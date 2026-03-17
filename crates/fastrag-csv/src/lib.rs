@@ -75,21 +75,18 @@ impl Parser for CsvParser {
 fn make_table_element(headers: &[String], rows: &[Vec<String>]) -> Element {
     let mut table = String::new();
 
-    // Header row
     table.push('|');
     for h in headers {
         table.push_str(&format!(" {h} |"));
     }
     table.push('\n');
 
-    // Separator
     table.push('|');
     for _ in headers {
         table.push_str(" --- |");
     }
     table.push('\n');
 
-    // Data rows
     for row in rows {
         table.push('|');
         for (i, cell) in row.iter().enumerate() {
@@ -125,18 +122,43 @@ mod tests {
     }
 
     #[test]
-    fn test_basic_csv() {
-        let doc = parse_csv("name,age,city\nAlice,30,NYC\nBob,25,LA\n");
-        assert_eq!(doc.elements.len(), 1);
-        assert_eq!(doc.elements[0].kind, ElementKind::Table);
-        assert!(doc.elements[0].text.contains("Alice"));
-        assert!(doc.elements[0].text.contains("| name |"));
-        assert_eq!(doc.metadata.custom["row_count"], "2");
-        assert_eq!(doc.metadata.custom["column_count"], "3");
+    fn supported_formats_returns_csv() {
+        assert_eq!(CsvParser::default().supported_formats(), &[FileFormat::Csv]);
     }
 
     #[test]
-    fn test_chunking() {
+    fn basic_csv_produces_table() {
+        let doc = parse_csv("name,age\nAlice,30\nBob,25\n");
+        assert_eq!(doc.elements.len(), 1);
+        assert_eq!(doc.elements[0].kind, ElementKind::Table);
+        assert!(doc.elements[0].text.contains("| name |"));
+        assert!(doc.elements[0].text.contains("| --- |"));
+        assert!(doc.elements[0].text.contains("| Alice | 30 |"));
+    }
+
+    #[test]
+    fn metadata_row_and_column_count() {
+        let doc = parse_csv("a,b\n1,2\n3,4\n");
+        assert_eq!(doc.metadata.custom["row_count"], "2");
+        assert_eq!(doc.metadata.custom["column_count"], "2");
+    }
+
+    #[test]
+    fn chunking_200_rows() {
+        let mut csv = String::from("id,value\n");
+        for i in 0..200 {
+            csv.push_str(&format!("{i},data{i}\n"));
+        }
+        let parser = CsvParser {
+            rows_per_chunk: 100,
+        };
+        let source = SourceInfo::new(FileFormat::Csv);
+        let doc = parser.parse(csv.as_bytes(), &source).unwrap();
+        assert_eq!(doc.elements.len(), 2);
+    }
+
+    #[test]
+    fn chunking_250_rows() {
         let mut csv = String::from("id,value\n");
         for i in 0..250 {
             csv.push_str(&format!("{i},data{i}\n"));
@@ -146,12 +168,38 @@ mod tests {
         };
         let source = SourceInfo::new(FileFormat::Csv);
         let doc = parser.parse(csv.as_bytes(), &source).unwrap();
-        assert_eq!(doc.elements.len(), 3); // 100 + 100 + 50
+        assert_eq!(doc.elements.len(), 3);
     }
 
     #[test]
-    fn test_empty_csv() {
+    fn table_element_has_rows_columns_attrs() {
+        let doc = parse_csv("a,b,c\n1,2,3\n");
+        assert_eq!(doc.elements[0].attributes["rows"], "1");
+        assert_eq!(doc.elements[0].attributes["columns"], "3");
+    }
+
+    #[test]
+    fn headers_only_no_data_rows() {
         let doc = parse_csv("name,age\n");
         assert!(doc.elements.is_empty());
+    }
+
+    #[test]
+    fn single_column() {
+        let doc = parse_csv("name\nAlice\nBob\n");
+        assert_eq!(doc.elements.len(), 1);
+        assert!(doc.elements[0].text.contains("| name |"));
+        assert!(doc.elements[0].text.contains("| Alice |"));
+    }
+
+    #[test]
+    fn source_file_propagated() {
+        let doc = parse_csv("a\n1\n");
+        assert_eq!(doc.metadata.source_file, Some("test.csv".to_string()));
+    }
+
+    #[test]
+    fn default_rows_per_chunk() {
+        assert_eq!(CsvParser::default().rows_per_chunk, 100);
     }
 }

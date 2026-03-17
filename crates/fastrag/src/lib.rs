@@ -23,3 +23,15 @@ pub fn parse(path: impl AsRef<Path>) -> Result<Document, FastRagError> {
     let registry = ParserRegistry::default();
     registry.parse_file(path)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_csv_fixture() {
+        let fixtures = format!("{}/../../tests/fixtures", env!("CARGO_MANIFEST_DIR"));
+        let doc = parse(format!("{fixtures}/sample.csv")).unwrap();
+        assert!(doc.elements.iter().any(|e| e.kind == ElementKind::Table));
+    }
+}

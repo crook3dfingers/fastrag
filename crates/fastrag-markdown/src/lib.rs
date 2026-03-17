@@ -31,7 +31,6 @@ impl Parser for MarkdownParser {
         let mut elements = Vec::new();
         collect_elements(root, &mut elements);
 
-        // Extract title from first heading
         for el in &elements {
             if (el.kind == ElementKind::Heading || el.kind == ElementKind::Title) && el.depth == 0 {
                 metadata.title = Some(el.text.clone());
@@ -54,7 +53,7 @@ fn collect_elements<'a>(node: &'a comrak::nodes::AstNode<'a>, elements: &mut Vec
             } else {
                 elements.push(Element::new(ElementKind::Heading, text).with_depth(depth));
             }
-            return; // Don't recurse into heading children
+            return;
         }
         NodeValue::Paragraph => {
             let text = collect_text(node);
@@ -80,7 +79,6 @@ fn collect_elements<'a>(node: &'a comrak::nodes::AstNode<'a>, elements: &mut Vec
             return;
         }
         NodeValue::List(_) => {
-            // Collect each item
             for child in node.children() {
                 let child_data = child.data.borrow();
                 if matches!(child_data.value, NodeValue::Item(_)) {
@@ -105,7 +103,6 @@ fn collect_elements<'a>(node: &'a comrak::nodes::AstNode<'a>, elements: &mut Vec
     }
     drop(data);
 
-    // Recurse for container nodes
     for child in node.children() {
         collect_elements(child, elements);
     }
@@ -157,7 +154,6 @@ fn render_table_text<'a>(node: &'a comrak::nodes::AstNode<'a>) -> String {
 
     let mut out = String::new();
 
-    // Header
     if let Some(header) = rows.first() {
         out.push('|');
         for cell in header {
@@ -171,7 +167,6 @@ fn render_table_text<'a>(node: &'a comrak::nodes::AstNode<'a>) -> String {
         out.push('\n');
     }
 
-    // Data rows
     for row in rows.iter().skip(1) {
         out.push('|');
         for cell in row {
@@ -194,18 +189,42 @@ mod tests {
     }
 
     #[test]
-    fn test_headings_and_paragraphs() {
-        let doc = parse_md("# Title\n\nSome text.\n\n## Section\n\nMore text.");
-        assert_eq!(doc.elements[0].kind, ElementKind::Title);
-        assert_eq!(doc.elements[0].text, "Title");
-        assert_eq!(doc.elements[1].kind, ElementKind::Paragraph);
-        assert_eq!(doc.elements[2].kind, ElementKind::Heading);
-        assert_eq!(doc.elements[2].depth, 1);
-        assert_eq!(doc.metadata.title, Some("Title".to_string()));
+    fn supported_formats_returns_markdown() {
+        assert_eq!(MarkdownParser.supported_formats(), &[FileFormat::Markdown]);
     }
 
     #[test]
-    fn test_code_block() {
+    fn h1_becomes_title_depth0() {
+        let doc = parse_md("# Title");
+        assert_eq!(doc.elements[0].kind, ElementKind::Title);
+        assert_eq!(doc.elements[0].text, "Title");
+        assert_eq!(doc.elements[0].depth, 0);
+    }
+
+    #[test]
+    fn h2_becomes_heading_depth1() {
+        let doc = parse_md("## Section");
+        assert_eq!(doc.elements[0].kind, ElementKind::Heading);
+        assert_eq!(doc.elements[0].depth, 1);
+        assert_eq!(doc.elements[0].text, "Section");
+    }
+
+    #[test]
+    fn h3_becomes_heading_depth2() {
+        let doc = parse_md("### Sub");
+        assert_eq!(doc.elements[0].kind, ElementKind::Heading);
+        assert_eq!(doc.elements[0].depth, 2);
+    }
+
+    #[test]
+    fn plain_paragraph_text() {
+        let doc = parse_md("Hello world.");
+        assert_eq!(doc.elements[0].kind, ElementKind::Paragraph);
+        assert_eq!(doc.elements[0].text, "Hello world.");
+    }
+
+    #[test]
+    fn code_block_with_language() {
         let doc = parse_md("```rust\nfn main() {}\n```");
         assert_eq!(doc.elements[0].kind, ElementKind::Code);
         assert_eq!(doc.elements[0].text, "fn main() {}");
@@ -216,23 +235,78 @@ mod tests {
     }
 
     #[test]
-    fn test_list_items() {
-        let doc = parse_md("- Item one\n- Item two\n- Item three");
+    fn code_block_without_language() {
+        let doc = parse_md("```\ncode here\n```");
+        assert_eq!(doc.elements[0].kind, ElementKind::Code);
+        assert_eq!(doc.elements[0].text, "code here");
+        assert!(doc.elements[0].attributes.get("language").is_none());
+    }
+
+    #[test]
+    fn list_items() {
+        let doc = parse_md("- A\n- B\n- C");
         assert_eq!(doc.elements.len(), 3);
         assert_eq!(doc.elements[0].kind, ElementKind::ListItem);
-        assert_eq!(doc.elements[0].text, "Item one");
+        assert_eq!(doc.elements[0].text, "A");
+        assert_eq!(doc.elements[1].text, "B");
+        assert_eq!(doc.elements[2].text, "C");
     }
 
     #[test]
-    fn test_blockquote() {
-        let doc = parse_md("> This is a quote.");
+    fn blockquote() {
+        let doc = parse_md("> A wise quote.");
         assert_eq!(doc.elements[0].kind, ElementKind::BlockQuote);
-        assert!(doc.elements[0].text.contains("This is a quote."));
+        assert!(doc.elements[0].text.contains("A wise quote."));
     }
 
     #[test]
-    fn test_horizontal_rule() {
+    fn horizontal_rule() {
         let doc = parse_md("---");
         assert_eq!(doc.elements[0].kind, ElementKind::HorizontalRule);
+    }
+
+    #[test]
+    fn table_produces_table_element() {
+        let doc = parse_md("| A | B |\n|---|---|\n| 1 | 2 |");
+        assert_eq!(doc.elements[0].kind, ElementKind::Table);
+        assert!(doc.elements[0].text.contains("| A |"));
+        assert!(doc.elements[0].text.contains("| 1 |"));
+    }
+
+    #[test]
+    fn title_sets_metadata_title() {
+        let doc = parse_md("# My Doc\n\nSome text.");
+        assert_eq!(doc.metadata.title, Some("My Doc".to_string()));
+    }
+
+    #[test]
+    fn inline_code_preserved() {
+        let doc = parse_md("Use `println!` for output.");
+        assert_eq!(doc.elements[0].kind, ElementKind::Paragraph);
+        assert!(doc.elements[0].text.contains("`println!`"));
+    }
+
+    #[test]
+    fn complex_doc_fixture_content() {
+        let input = "# FastRAG Sample Document\n\nThis is a sample markdown document for testing.\n\n## Features\n\n- Fast parsing\n- Multiple format support\n- Structured output\n\n## Code Example\n\n```rust\nfn main() {\n    println!(\"Hello, FastRAG!\");\n}\n```\n\n## Table\n\n| Feature | Status |\n|---------|--------|\n| PDF     | Done   |\n| HTML    | Done   |\n| Markdown| Done   |\n\n---\n\n> FastRAG: 100x faster document parsing.";
+        let doc = parse_md(input);
+        assert_eq!(
+            doc.metadata.title,
+            Some("FastRAG Sample Document".to_string())
+        );
+        assert!(doc.elements.iter().any(|e| e.kind == ElementKind::Title));
+        assert!(doc.elements.iter().any(|e| e.kind == ElementKind::ListItem));
+        assert!(doc.elements.iter().any(|e| e.kind == ElementKind::Code));
+        assert!(doc.elements.iter().any(|e| e.kind == ElementKind::Table));
+        assert!(
+            doc.elements
+                .iter()
+                .any(|e| e.kind == ElementKind::HorizontalRule)
+        );
+        assert!(
+            doc.elements
+                .iter()
+                .any(|e| e.kind == ElementKind::BlockQuote)
+        );
     }
 }

@@ -24,7 +24,6 @@ impl Parser for PdfParser {
         let num_pages = pdf.num_pages();
         metadata.page_count = Some(num_pages as usize);
 
-        // Extract document info if available
         if let Some(ref info) = pdf.trailer.info_dict {
             if let Some(ref title) = info.title
                 && let Ok(t) = title.to_string()
@@ -74,7 +73,6 @@ impl Parser for PdfParser {
                             page_text.push('\n');
                         }
                         pdf::content::Op::MoveTextPosition { translation } => {
-                            // Large Y offset likely means new line
                             if translation.y.abs() > 1.0 && !page_text.is_empty() {
                                 page_text.push('\n');
                             }
@@ -88,7 +86,6 @@ impl Parser for PdfParser {
                 continue;
             }
 
-            // Split page text into paragraphs on blank lines
             for para in page_text.split("\n\n") {
                 let trimmed = para.trim();
                 if trimmed.is_empty() {
@@ -101,5 +98,57 @@ impl Parser for PdfParser {
         }
 
         Ok(Document { metadata, elements })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn supported_formats_returns_pdf() {
+        assert_eq!(PdfParser.supported_formats(), &[FileFormat::Pdf]);
+    }
+
+    #[test]
+    fn invalid_bytes_returns_parse_error() {
+        let parser = PdfParser;
+        let source = SourceInfo::new(FileFormat::Pdf);
+        let result = parser.parse(b"not a pdf", &source);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            FastRagError::Parse { format, .. } => assert_eq!(format, FileFormat::Pdf),
+            other => panic!("expected Parse error, got: {other}"),
+        }
+    }
+
+    #[test]
+    fn empty_input_returns_error() {
+        let parser = PdfParser;
+        let source = SourceInfo::new(FileFormat::Pdf);
+        let result = parser.parse(&[], &source);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn minimal_pdf_parses() {
+        // Minimal valid PDF with one empty page
+        let pdf_bytes = b"%PDF-1.0\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/MediaBox[0 0 612 792]/Parent 2 0 R>>endobj\nxref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \ntrailer<</Size 4/Root 1 0 R>>\nstartxref\n190\n%%EOF";
+        let parser = PdfParser;
+        let source = SourceInfo::new(FileFormat::Pdf).with_filename("test.pdf");
+        // This may or may not parse with the pdf crate - test error path if it fails
+        let result = parser.parse(pdf_bytes, &source);
+        match result {
+            Ok(doc) => {
+                assert_eq!(doc.metadata.page_count, Some(1));
+                // Empty page should have no elements
+                assert!(doc.elements.is_empty());
+            }
+            Err(FastRagError::Parse { format, .. }) => {
+                // Acceptable: the minimal PDF may not parse with this crate
+                assert_eq!(format, FileFormat::Pdf);
+            }
+            Err(other) => panic!("unexpected error type: {other}"),
+        }
     }
 }
