@@ -24,7 +24,7 @@ mkdir -p "$FIXTURES/pdf"
 echo "==> PDF fixtures"
 fetch "$FIXTURES/pdf/small.pdf"  "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf"
 fetch "$FIXTURES/pdf/medium.pdf" "https://arxiv.org/pdf/1706.03762"
-fetch "$FIXTURES/pdf/large.pdf"  "https://www.congress.gov/117/plaws/publ167/PLAW-117publ167.pdf"
+fetch "$FIXTURES/pdf/dense_text.pdf"  "https://www.congress.gov/117/plaws/publ167/PLAW-117publ167.pdf"
 
 # ── HTML ─────────────────────────────────────────────────────────────────────
 mkdir -p "$FIXTURES/html"

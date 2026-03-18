@@ -62,7 +62,7 @@ TOOLS = {
 # ── Fixture manifest ─────────────────────────────────────────────────────────
 
 FIXTURES = {
-    "pdf": ["small.pdf", "medium.pdf", "large.pdf"],
+    "pdf": ["small.pdf", "medium.pdf", "dense_text.pdf"],
     "html": ["small.html", "medium.html", "large.html"],
     "markdown": ["small.md", "medium.md"],
     "csv": ["small.csv", "medium.csv", "large.csv"],

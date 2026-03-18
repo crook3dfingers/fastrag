@@ -69,7 +69,7 @@ Results report the **median** across iterations to reduce noise from OS scheduli
 |-------|--------|-------|
 | `pdf/small.pdf` | W3C dummy PDF | 13 KB |
 | `pdf/medium.pdf` | "Attention Is All You Need" (arXiv) | 2 MB |
-| `pdf/large.pdf` | US Public Law 117-167 | 3 MB |
+| `pdf/dense_text.pdf` | US Public Law 117-167 (dense text) | 1.2 MB |
 | `html/small.html` | example.com | 1 KB |
 | `html/medium.html` | Wikipedia: Rust (programming language) | 500 KB |
 | `html/large.html` | HTML spec parsing section | 2 MB |
