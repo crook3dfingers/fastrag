@@ -12,6 +12,7 @@ members = [
     "crates/fastrag-docx",
     "crates/fastrag-pptx",
     "crates/fastrag",
+    "crates/fastrag-mcp",
     "fastrag-cli",
 ]
 
@@ -33,6 +34,7 @@ fastrag-xlsx = { path = "crates/fastrag-xlsx", version = "0.1.0" }
 fastrag-docx = { path = "crates/fastrag-docx", version = "0.1.0" }
 fastrag-pptx = { path = "crates/fastrag-pptx", version = "0.1.0" }
 fastrag = { path = "crates/fastrag", version = "0.1.0" }
+fastrag-mcp = { path = "crates/fastrag-mcp", version = "0.1.0" }
 rayon = "1"
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }

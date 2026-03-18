@@ -1,3 +1,4 @@
+pub mod ops;
 pub mod registry;
 
 // Re-export core types

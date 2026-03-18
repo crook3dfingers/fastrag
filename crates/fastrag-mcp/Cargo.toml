@@ -1,0 +1,18 @@
+[package]
+name = "fastrag-mcp"
+description = "MCP server for FastRAG document parser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+fastrag.workspace = true
+rmcp = { version = "1.2", features = ["server", "transport-io"] }
+schemars = "0.8"
+serde.workspace = true
+serde_json.workspace = true
+tokio = { version = "1", features = ["full"] }
+
+[dev-dependencies]
+serde_json.workspace = true

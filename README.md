@@ -101,6 +101,60 @@ fastrag = { version = "0.1", features = ["pdf-images", "pdf-table-detect"] }
 
 OCR requires system packages (`tesseract-ocr`, `tesseract-ocr-eng`) and links against PDFium statically.
 
+## Chunking for RAG
+
+FastRAG provides three chunking strategies for splitting parsed documents into RAG-ready pieces:
+
+| Strategy | Description |
+|----------|-------------|
+| `basic` | Accumulates elements up to the character limit, then starts a new chunk |
+| `by-title` | Splits on Title/Heading boundaries, sub-chunks large sections |
+| `recursive` | Recursive character splitting — tries separators in order, falling back to finer granularity |
+
+All strategies support **chunk overlap**, which repeats characters from the end of one chunk at the start of the next, preserving context across boundaries.
+
+### CLI
+
+```bash
+# Basic chunking with 500-char limit
+fastrag parse document.pdf --chunk-strategy basic --chunk-size 500
+
+# By-title with 200-char overlap
+fastrag parse document.pdf --chunk-strategy by-title --chunk-size 1000 --chunk-overlap 200
+
+# Recursive splitting (default separators: \n\n, \n, ". ", " ", "")
+fastrag parse document.pdf --chunk-strategy recursive --chunk-size 500
+
+# Recursive with custom separators (comma-separated, use \n for newline)
+fastrag parse document.pdf --chunk-strategy recursive --chunk-size 500 --chunk-separators "\n\n,\n,. , ,"
+```
+
+### Library
+
+```rust
+use fastrag::{parse, ChunkingStrategy, default_separators};
+
+let doc = parse("document.pdf")?;
+
+// Basic chunking
+let chunks = doc.chunk(&ChunkingStrategy::Basic {
+    max_characters: 500,
+    overlap: 0,
+});
+
+// Recursive character splitting with overlap
+let chunks = doc.chunk(&ChunkingStrategy::RecursiveCharacter {
+    max_characters: 500,
+    overlap: 100,
+    separators: default_separators(),
+});
+
+for chunk in &chunks {
+    println!("Chunk {}: {} chars", chunk.index, chunk.char_count);
+    println!("{}", chunk.text);
+}
+```
+
 ## Architecture
 
 FastRAG uses a workspace of small, focused crates:

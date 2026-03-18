@@ -27,13 +27,21 @@ pub enum Command {
         #[arg(short = 'j', long, default_value = "4")]
         workers: usize,
 
-        /// Chunking strategy (none, basic, by-title)
+        /// Chunking strategy (none, basic, by-title, recursive)
         #[arg(long, default_value = "none")]
         chunk_strategy: ChunkStrategyArg,
 
         /// Maximum characters per chunk
         #[arg(long, default_value = "1000")]
         chunk_size: usize,
+
+        /// Number of overlapping characters between consecutive chunks
+        #[arg(long, default_value = "0")]
+        chunk_overlap: usize,
+
+        /// Comma-separated list of separators for recursive strategy (use \n for newline)
+        #[arg(long)]
+        chunk_separators: Option<String>,
 
         /// Detect document language
         #[arg(long)]
@@ -42,6 +50,10 @@ pub enum Command {
 
     /// List supported formats
     Formats,
+
+    /// Start MCP server for AI assistant integration
+    #[cfg(feature = "mcp")]
+    Serve,
 }
 
 #[derive(Clone, ValueEnum)]
@@ -56,4 +68,5 @@ pub enum ChunkStrategyArg {
     None,
     Basic,
     ByTitle,
+    Recursive,
 }

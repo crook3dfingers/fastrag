@@ -22,11 +22,34 @@ cargo bench -p fastrag-pdf --bench pdf_parsing --features images,table-detect  #
 
 The OCR feature (`--features ocr`) requires the `tesseract` library and `pdfium-render` (statically linked). These dependencies must be available in the build environment.
 
+## MCP Server
+
+FastRAG includes an MCP (Model Context Protocol) server for AI assistant integration.
+
+```bash
+cargo run -- serve                    # Start MCP server (stdio transport)
+cargo build --release                 # Build with MCP
+cargo build --release --no-default-features --features language-detection  # Build without MCP
+```
+
+### MCP Tools
+
+| Tool | Description |
+|------|-------------|
+| `parse_file` | Parse a single document file |
+| `parse_directory` | Parse all files in a directory |
+| `list_formats` | List supported file formats |
+| `chunk_document` | Parse and chunk a file for RAG |
+
+The MCP crate lives at `crates/fastrag-mcp/`.
+
 ## Architecture
 
 - Workspace with crates in `crates/` and CLI in `fastrag-cli/`
 - Every format parser implements the `Parser` trait from `fastrag-core`
 - `crates/fastrag/` is the facade library with `ParserRegistry` for format detection and dispatch
+- `crates/fastrag/src/ops.rs` is the shared operations layer used by both CLI and MCP
+- `crates/fastrag-mcp/` is the MCP server crate (gated behind `mcp` feature flag)
 - Feature flags gate each parser crate (default: all enabled)
 - Test fixtures live in `tests/fixtures/`
 
@@ -47,6 +70,15 @@ The OCR feature (`--features ocr`) requires the `tesseract` library and `pdfium-
 4. Add feature flag in `crates/fastrag/Cargo.toml`
 5. Register in `ParserRegistry::default()` in `crates/fastrag/src/registry.rs`
 6. Add test fixture in `tests/fixtures/`
+
+## CLI + MCP Parity
+
+Every user-facing operation must be exposed in both CLI and MCP server, both calling shared ops in `crates/fastrag/src/ops.rs`. When adding a new operation:
+
+1. Add the function to `crates/fastrag/src/ops.rs`
+2. Add CLI subcommand/flag in `fastrag-cli/src/args.rs` and handler in `main.rs`
+3. Add MCP tool in `crates/fastrag-mcp/src/lib.rs` with `#[tool]` attribute
+4. Add tests for both CLI and MCP paths
 
 ## Development Discipline
 

@@ -8,6 +8,8 @@ repository.workspace = true
 
 [dependencies]
 fastrag-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 fastrag-pdf = { workspace = true, optional = true }
 fastrag-html = { workspace = true, optional = true }
 fastrag-markdown = { workspace = true, optional = true }

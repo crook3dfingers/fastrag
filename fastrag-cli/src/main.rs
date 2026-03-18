@@ -1,12 +1,13 @@
 mod args;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 use args::{ChunkStrategyArg, Cli, Command, OutputFormatArg};
 use clap::Parser;
+use fastrag::ops::{self, collect_files, output_path, render_document};
 use fastrag::registry::ParserRegistry;
-use fastrag::{ChunkingStrategy, FileFormat, OutputFormat};
+use fastrag::{ChunkingStrategy, OutputFormat};
 use indicatif::{ProgressBar, ProgressStyle};
 use tokio::sync::Semaphore;
 
@@ -22,6 +23,8 @@ async fn main() {
             workers,
             chunk_strategy,
             chunk_size,
+            chunk_overlap,
+            chunk_separators,
             detect_language,
         } => {
             let output_format = match format {
@@ -34,9 +37,22 @@ async fn main() {
                 ChunkStrategyArg::None => None,
                 ChunkStrategyArg::Basic => Some(ChunkingStrategy::Basic {
                     max_characters: chunk_size,
+                    overlap: chunk_overlap,
                 }),
                 ChunkStrategyArg::ByTitle => Some(ChunkingStrategy::ByTitle {
                     max_characters: chunk_size,
+                    overlap: chunk_overlap,
+                }),
+                ChunkStrategyArg::Recursive => Some(ChunkingStrategy::RecursiveCharacter {
+                    max_characters: chunk_size,
+                    overlap: chunk_overlap,
+                    separators: chunk_separators
+                        .map(|s| {
+                            s.split(',')
+                                .map(|sep| sep.replace("\\n", "\n").replace("\\t", "\t"))
+                                .collect()
+                        })
+                        .unwrap_or_else(fastrag::default_separators),
                 }),
             };
 
@@ -71,6 +87,10 @@ async fn main() {
                 println!("  - {format}");
             }
         }
+        #[cfg(feature = "mcp")]
+        Command::Serve => {
+            fastrag_mcp::serve_stdio().await.unwrap();
+        }
     }
 }
 
@@ -81,32 +101,20 @@ fn parse_single_file(
     chunking: Option<&ChunkingStrategy>,
     detect_language: bool,
 ) {
-    let registry = ParserRegistry::default();
-    match registry.parse_file(path) {
-        Ok(mut doc) => {
-            #[cfg(feature = "language-detection")]
-            if detect_language {
-                doc.detect_language();
-            }
-
-            let rendered = if let Some(strategy) = chunking {
-                let chunks = doc.chunk(strategy);
-                render_chunks(&chunks, output_format)
-            } else {
-                render_document(&doc, output_format)
-            };
+    match ops::parse_single(path, output_format, chunking, detect_language) {
+        Ok(result) => {
             if let Some(dir) = output_dir {
                 let out_path = output_path(path, dir, output_format);
                 if let Some(parent) = out_path.parent() {
                     std::fs::create_dir_all(parent).ok();
                 }
-                if let Err(e) = std::fs::write(&out_path, &rendered) {
+                if let Err(e) = std::fs::write(&out_path, &result.content) {
                     eprintln!("Error writing {}: {e}", out_path.display());
                     std::process::exit(1);
                 }
                 eprintln!("Wrote {}", out_path.display());
             } else {
-                print!("{rendered}");
+                print!("{}", result.content);
             }
         }
         Err(e) => {
@@ -187,102 +195,12 @@ async fn parse_directory(
     pb.finish_with_message("done");
 }
 
-fn collect_files(dir: &Path) -> Vec<PathBuf> {
-    let mut files = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_file() {
-                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                    let format = FileFormat::detect(&path, &[]);
-                    if format != FileFormat::Unknown {
-                        files.push(path);
-                        continue;
-                    }
-                    if matches!(
-                        ext.to_lowercase().as_str(),
-                        "pdf"
-                            | "html"
-                            | "htm"
-                            | "md"
-                            | "markdown"
-                            | "csv"
-                            | "txt"
-                            | "text"
-                            | "log"
-                            | "docx"
-                            | "pptx"
-                            | "xlsx"
-                            | "xml"
-                    ) {
-                        files.push(path);
-                    }
-                }
-            } else if path.is_dir() {
-                files.extend(collect_files(&path));
-            }
-        }
-    }
-    files
-}
-
-fn render_chunks(chunks: &[fastrag::Chunk], format: OutputFormat) -> String {
-    let mut out = String::new();
-    for chunk in chunks {
-        match format {
-            OutputFormat::Markdown => {
-                if let Some(ref section) = chunk.section {
-                    out.push_str(&format!("## {section}\n\n"));
-                }
-                out.push_str(&chunk.text);
-                out.push_str("\n\n---\n\n");
-            }
-            OutputFormat::Json => {
-                out.push_str(&format!(
-                    "{{\"index\":{},\"char_count\":{},\"section\":{},\"text\":{}}}\n",
-                    chunk.index,
-                    chunk.char_count,
-                    chunk
-                        .section
-                        .as_ref()
-                        .map(|s| format!("\"{}\"", s.replace('"', "\\\"")))
-                        .unwrap_or_else(|| "null".to_string()),
-                    serde_json::to_string(&chunk.text).unwrap_or_default()
-                ));
-            }
-            OutputFormat::PlainText => {
-                out.push_str(&chunk.text);
-                out.push_str("\n\n");
-            }
-        }
-    }
-    out.trim_end().to_string()
-}
-
-fn render_document(doc: &fastrag::Document, format: OutputFormat) -> String {
-    match format {
-        OutputFormat::Markdown => doc.to_markdown(),
-        OutputFormat::Json => doc
-            .to_json()
-            .unwrap_or_else(|e| format!("{{\"error\": \"{e}\"}}")),
-        OutputFormat::PlainText => doc.to_plain_text(),
-    }
-}
-
-fn output_path(input: &Path, output_dir: &str, format: OutputFormat) -> PathBuf {
-    let out_ext = match format {
-        OutputFormat::Markdown => "md",
-        OutputFormat::Json => "json",
-        OutputFormat::PlainText => "txt",
-    };
-    let filename = input.file_name().unwrap_or_default();
-    PathBuf::from(output_dir).join(format!("{}.{out_ext}", filename.to_string_lossy()))
-}
-
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
-    use fastrag::{Document, Element, ElementKind, Metadata};
+    use fastrag::{Document, Element, ElementKind, FileFormat, Metadata};
 
     fn sample_doc() -> Document {
         let mut m = Metadata::new(FileFormat::Text);
