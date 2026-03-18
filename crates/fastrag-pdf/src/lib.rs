@@ -55,10 +55,10 @@ fn extract_page_elements(
             }
             pdf::content::Op::TextDraw { text } => {
                 if let Ok(s) = text.to_string() {
-                    if !s.trim().is_empty() {
-                        if let Some(last) = para_positions.last_mut() {
-                            last.push((current_x, current_y));
-                        }
+                    if !s.trim().is_empty()
+                        && let Some(last) = para_positions.last_mut()
+                    {
+                        last.push((current_x, current_y));
                     }
                     page_text.push_str(&s);
                 }
@@ -68,10 +68,10 @@ fn extract_page_elements(
                     if let pdf::content::TextDrawAdjusted::Text(t) = item
                         && let Ok(s) = t.to_string()
                     {
-                        if !s.trim().is_empty() {
-                            if let Some(last) = para_positions.last_mut() {
-                                last.push((current_x, current_y));
-                            }
+                        if !s.trim().is_empty()
+                            && let Some(last) = para_positions.last_mut()
+                        {
+                            last.push((current_x, current_y));
                         }
                         page_text.push_str(&s);
                     }
@@ -137,21 +137,21 @@ fn extract_page_elements(
         let mut el = Element::new(ElementKind::Paragraph, trimmed).with_page(page_num as usize + 1);
 
         // Compute bounding box from tracked positions
-        if let Some(positions) = para_positions.get(para_idx) {
-            if !positions.is_empty() {
-                let min_x = positions.iter().map(|(x, _)| *x).fold(f32::MAX, f32::min);
-                let max_x = positions.iter().map(|(x, _)| *x).fold(f32::MIN, f32::max);
-                let min_y = positions.iter().map(|(_, y)| *y).fold(f32::MAX, f32::min);
-                let max_y = positions.iter().map(|(_, y)| *y).fold(f32::MIN, f32::max);
+        if let Some(positions) = para_positions.get(para_idx)
+            && !positions.is_empty()
+        {
+            let min_x = positions.iter().map(|(x, _)| *x).fold(f32::MAX, f32::min);
+            let max_x = positions.iter().map(|(x, _)| *x).fold(f32::MIN, f32::max);
+            let min_y = positions.iter().map(|(_, y)| *y).fold(f32::MAX, f32::min);
+            let max_y = positions.iter().map(|(_, y)| *y).fold(f32::MIN, f32::max);
 
-                el = el.with_bounding_box(BoundingBox {
-                    x: min_x,
-                    y: min_y,
-                    width: (max_x - min_x).max(0.0),
-                    height: (max_y - min_y).max(0.0),
-                    page: page_num as usize + 1,
-                });
-            }
+            el = el.with_bounding_box(BoundingBox {
+                x: min_x,
+                y: min_y,
+                width: (max_x - min_x).max(0.0),
+                height: (max_y - min_y).max(0.0),
+                page: page_num as usize + 1,
+            });
         }
 
         elements.push(el);
