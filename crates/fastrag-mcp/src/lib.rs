@@ -12,8 +12,10 @@ pub struct ParseFileParams {
     /// Absolute path to the file to parse
     #[schemars(description = "Absolute path to the file to parse")]
     pub path: String,
-    /// Output format: markdown, json, or text (default: markdown)
-    #[schemars(description = "Output format: markdown, json, or text (default: markdown)")]
+    /// Output format: markdown, json, jsonl, text, or html (default: markdown)
+    #[schemars(
+        description = "Output format: markdown, json, jsonl, text, or html (default: markdown)"
+    )]
     pub format: Option<String>,
     /// Whether to detect the document language
     #[schemars(description = "Whether to detect the document language")]
@@ -25,8 +27,10 @@ pub struct ParseDirectoryParams {
     /// Absolute path to the directory to parse
     #[schemars(description = "Absolute path to the directory containing files to parse")]
     pub path: String,
-    /// Output format: markdown, json, or text (default: markdown)
-    #[schemars(description = "Output format: markdown, json, or text (default: markdown)")]
+    /// Output format: markdown, json, jsonl, text, or html (default: markdown)
+    #[schemars(
+        description = "Output format: markdown, json, jsonl, text, or html (default: markdown)"
+    )]
     pub format: Option<String>,
     /// Whether to detect the document language
     #[schemars(description = "Whether to detect the document language")]
@@ -54,8 +58,10 @@ pub struct ChunkDocumentParams {
         description = "Custom separators for recursive strategy, ordered most to least specific"
     )]
     pub separators: Option<Vec<String>>,
-    /// Output format: markdown, json, or text (default: markdown)
-    #[schemars(description = "Output format: markdown, json, or text (default: markdown)")]
+    /// Output format: markdown, json, jsonl, text, or html (default: markdown)
+    #[schemars(
+        description = "Output format: markdown, json, jsonl, text, or html (default: markdown)"
+    )]
     pub format: Option<String>,
     /// Context template for injecting document context into chunks
     #[schemars(
@@ -96,6 +102,7 @@ impl Default for FastRagMcpServer {
 fn parse_output_format(format: Option<&str>) -> OutputFormat {
     match format.map(|s| s.to_lowercase()).as_deref() {
         Some("json") => OutputFormat::Json,
+        Some("jsonl") => OutputFormat::Jsonl,
         Some("text") | Some("plain") | Some("plaintext") => OutputFormat::PlainText,
         Some("html") => OutputFormat::Html,
         _ => OutputFormat::Markdown,
@@ -220,7 +227,7 @@ impl ServerHandler for FastRagMcpServer {
                  Use `parse_file` for single documents, `chunk_document` when you need \
                  RAG-ready chunks, `parse_directory` for batch processing, and \
                  `list_formats` to check supported file types. All tools accept an \
-                 optional `format` parameter (markdown/json/text) — default is markdown \
+                 optional `format` parameter (markdown/json/jsonl/text/html) — default is markdown \
                  which works best for LLM consumption.",
         )
     }
@@ -306,6 +313,7 @@ mod tests {
             OutputFormat::Markdown
         );
         assert_eq!(parse_output_format(Some("json")), OutputFormat::Json);
+        assert_eq!(parse_output_format(Some("jsonl")), OutputFormat::Jsonl);
         assert_eq!(parse_output_format(Some("text")), OutputFormat::PlainText);
         assert_eq!(parse_output_format(Some("plain")), OutputFormat::PlainText);
         assert_eq!(
@@ -313,6 +321,7 @@ mod tests {
             OutputFormat::PlainText
         );
         assert_eq!(parse_output_format(Some("JSON")), OutputFormat::Json);
+        assert_eq!(parse_output_format(Some("JSONL")), OutputFormat::Jsonl);
         assert_eq!(parse_output_format(Some("html")), OutputFormat::Html);
     }
 

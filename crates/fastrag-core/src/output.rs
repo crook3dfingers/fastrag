@@ -5,6 +5,7 @@ use crate::document::{Document, ElementKind};
 pub enum OutputFormat {
     Markdown,
     Json,
+    Jsonl,
     PlainText,
     Html,
 }
@@ -79,6 +80,18 @@ impl Document {
     /// Render the document as JSON.
     pub fn to_json(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string_pretty(self)
+    }
+
+    /// Render the document as JSONL (one JSON object per element, one per line).
+    pub fn to_jsonl(&self) -> String {
+        let mut out = String::new();
+        for element in &self.elements {
+            if let Ok(line) = serde_json::to_string(element) {
+                out.push_str(&line);
+                out.push('\n');
+            }
+        }
+        out.trim_end().to_string()
     }
 
     /// Render the document as plain text (all element text concatenated).
@@ -492,5 +505,31 @@ mod tests {
         assert!(html.contains("<body>"), "got: {html}");
         assert!(html.contains("</body>"), "got: {html}");
         assert!(html.contains("</html>"), "got: {html}");
+    }
+
+    // --- to_jsonl ---
+
+    #[test]
+    fn jsonl_one_line_per_element() {
+        let doc = doc_with(vec![
+            Element::new(ElementKind::Title, "T"),
+            Element::new(ElementKind::Paragraph, "P"),
+            Element::new(ElementKind::Code, "C"),
+        ]);
+        let jsonl = doc.to_jsonl();
+        let lines: Vec<&str> = jsonl.lines().collect();
+        assert_eq!(lines.len(), 3);
+        for line in &lines {
+            let parsed: serde_json::Value = serde_json::from_str(line).unwrap();
+            assert!(parsed["kind"].is_string());
+            assert!(parsed["text"].is_string());
+        }
+    }
+
+    #[test]
+    fn jsonl_empty_doc() {
+        let doc = doc_with(vec![]);
+        let jsonl = doc.to_jsonl();
+        assert_eq!(jsonl, "");
     }
 }

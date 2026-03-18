@@ -72,6 +72,7 @@ pub enum Command {
 pub enum OutputFormatArg {
     Markdown,
     Json,
+    Jsonl,
     Text,
     Html,
 }

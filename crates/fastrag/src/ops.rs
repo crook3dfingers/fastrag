@@ -175,7 +175,10 @@ pub fn chunk_file_with_context(
                     out.push_str(&c.text);
                     out
                 }
-                _ => c.text.clone(),
+                OutputFormat::Json
+                | OutputFormat::Jsonl
+                | OutputFormat::PlainText
+                | OutputFormat::Html => c.text.clone(),
             },
         })
         .collect();
@@ -248,7 +251,7 @@ pub fn render_chunks(chunks: &[crate::Chunk], format: OutputFormat) -> String {
                 out.push_str(&chunk.text);
                 out.push_str("\n\n---\n\n");
             }
-            OutputFormat::Json => {
+            OutputFormat::Json | OutputFormat::Jsonl => {
                 out.push_str(&format!(
                     "{{\"index\":{},\"char_count\":{},\"section\":{},\"text\":{}}}\n",
                     chunk.index,
@@ -283,6 +286,7 @@ pub fn render_document(doc: &Document, format: OutputFormat) -> String {
         OutputFormat::Json => doc
             .to_json()
             .unwrap_or_else(|e| format!("{{\"error\": \"{e}\"}}")),
+        OutputFormat::Jsonl => doc.to_jsonl(),
         OutputFormat::PlainText => doc.to_plain_text(),
         OutputFormat::Html => doc.to_html(),
     }
@@ -293,6 +297,7 @@ pub fn output_path(input: &Path, output_dir: &str, format: OutputFormat) -> Path
     let out_ext = match format {
         OutputFormat::Markdown => "md",
         OutputFormat::Json => "json",
+        OutputFormat::Jsonl => "jsonl",
         OutputFormat::PlainText => "txt",
         OutputFormat::Html => "html",
     };
@@ -397,6 +402,48 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed["filename"], "sample.txt");
         assert!(parsed["element_count"].is_number());
+    }
+
+    #[test]
+    fn render_document_jsonl() {
+        use crate::{Document, Element, ElementKind, FileFormat, Metadata};
+        let mut m = Metadata::new(FileFormat::Text);
+        m.title = Some("T".to_string());
+        let doc = Document {
+            metadata: m,
+            elements: vec![
+                Element::new(ElementKind::Title, "T"),
+                Element::new(ElementKind::Paragraph, "P"),
+            ],
+        };
+        let jsonl = render_document(&doc, OutputFormat::Jsonl);
+        let lines: Vec<&str> = jsonl.lines().collect();
+        assert_eq!(lines.len(), 2);
+        for line in &lines {
+            let parsed: serde_json::Value = serde_json::from_str(line).unwrap();
+            assert!(parsed["kind"].is_string());
+        }
+    }
+
+    #[test]
+    fn output_path_jsonl() {
+        let p = output_path(Path::new("data/sample.csv"), "/out", OutputFormat::Jsonl);
+        assert_eq!(p, PathBuf::from("/out/sample.csv.jsonl"));
+    }
+
+    #[test]
+    fn render_chunks_jsonl() {
+        let chunks = vec![crate::Chunk {
+            index: 0,
+            text: "hello".to_string(),
+            char_count: 5,
+            section: None,
+            elements: vec![],
+        }];
+        let result = render_chunks(&chunks, OutputFormat::Jsonl);
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed["index"], 0);
+        assert_eq!(parsed["text"], "hello");
     }
 
     #[test]

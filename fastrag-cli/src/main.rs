@@ -33,6 +33,7 @@ async fn main() {
             let output_format = match format {
                 OutputFormatArg::Markdown => OutputFormat::Markdown,
                 OutputFormatArg::Json => OutputFormat::Json,
+                OutputFormatArg::Jsonl => OutputFormat::Jsonl,
                 OutputFormatArg::Text => OutputFormat::PlainText,
                 OutputFormatArg::Html => OutputFormat::Html,
             };
