@@ -77,10 +77,10 @@ fn extract_body_text(mail: &mailparse::ParsedMail) -> String {
                 .find(|h| h.get_key().to_lowercase() == "content-type")
             {
                 let ct_val = ct.get_value().to_lowercase();
-                if ct_val.contains("text/plain") {
-                    if let Ok(body) = part.get_body() {
-                        return body;
-                    }
+                if ct_val.contains("text/plain")
+                    && let Ok(body) = part.get_body()
+                {
+                    return body;
                 }
             }
         }
@@ -92,19 +92,19 @@ fn extract_body_text(mail: &mailparse::ParsedMail) -> String {
                 .find(|h| h.get_key().to_lowercase() == "content-type")
             {
                 let ct_val = ct.get_value().to_lowercase();
-                if ct_val.contains("text/html") {
-                    if let Ok(body) = part.get_body() {
-                        return body;
-                    }
+                if ct_val.contains("text/html")
+                    && let Ok(body) = part.get_body()
+                {
+                    return body;
                 }
             }
         }
         // Try any part
         for part in &mail.subparts {
-            if let Ok(body) = part.get_body() {
-                if !body.trim().is_empty() {
-                    return body;
-                }
+            if let Ok(body) = part.get_body()
+                && !body.trim().is_empty()
+            {
+                return body;
             }
         }
     }
