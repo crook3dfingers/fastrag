@@ -57,6 +57,7 @@ pub fn parse_single(
     let registry = ParserRegistry::default();
     let mut doc = registry.parse_file(path)?;
     doc.build_hierarchy();
+    doc.associate_captions();
 
     #[cfg(feature = "language-detection")]
     if detect_language {

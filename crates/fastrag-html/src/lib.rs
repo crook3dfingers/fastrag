@@ -66,7 +66,7 @@ impl Parser for HtmlParser {
                         .trim()
                         .to_string();
 
-                    if text.is_empty() && tag != "table" && tag != "hr" {
+                    if text.is_empty() && tag != "table" && tag != "hr" && tag != "figure" {
                         continue;
                     }
 
@@ -108,6 +108,51 @@ impl Parser for HtmlParser {
                                     .map(|er| render_html_table(er))
                                     .unwrap_or(text.clone());
                                 elements.push(Element::new(ElementKind::Table, full_text.trim()));
+                            }
+                            "figure" => {
+                                if let Some(er) = scraper::ElementRef::wrap(node) {
+                                    let img_sel = Selector::parse("img").expect("valid");
+                                    let cap_sel = Selector::parse("figcaption").expect("valid");
+                                    if let Some(img_el) = er.select(&img_sel).next() {
+                                        let src = img_el.value().attr("src").unwrap_or("");
+                                        let alt = img_el.value().attr("alt").unwrap_or("");
+                                        let mut img_elem = Element::new(ElementKind::Image, src);
+                                        img_elem
+                                            .attributes
+                                            .insert("alt".to_string(), alt.to_string());
+                                        if let Some(cap_el) = er.select(&cap_sel).next() {
+                                            let cap_text: String =
+                                                cap_el.text().collect::<String>();
+                                            let cap_text = cap_text.trim().to_string();
+                                            if !cap_text.is_empty() {
+                                                // Use temporary markers; actual IDs assigned by build_hierarchy
+                                                let img_marker =
+                                                    format!("__figure_{}", elements.len());
+                                                let cap_marker =
+                                                    format!("__figure_{}", elements.len() + 1);
+                                                img_elem.attributes.insert(
+                                                    "associated_caption_id".to_string(),
+                                                    cap_marker,
+                                                );
+                                                elements.push(img_elem);
+                                                let mut cap_elem =
+                                                    Element::new(ElementKind::Paragraph, &cap_text);
+                                                cap_elem.attributes.insert(
+                                                    "associated_image_id".to_string(),
+                                                    img_marker,
+                                                );
+                                                elements.push(cap_elem);
+                                            } else {
+                                                elements.push(img_elem);
+                                            }
+                                        } else {
+                                            elements.push(img_elem);
+                                        }
+                                    }
+                                }
+                            }
+                            "figcaption" => {
+                                // Handled by <figure> branch above — skip standalone
                             }
                             "img" => {
                                 let src = el.attr("src").unwrap_or("");
@@ -306,6 +351,29 @@ mod tests {
             FastRagError::Encoding(_) => {}
             other => panic!("expected Encoding error, got: {other}"),
         }
+    }
+
+    #[test]
+    fn figure_figcaption_association() {
+        let doc = parse_html(
+            "<html><body>\
+             <figure><img src=\"chart.png\" alt=\"Chart\"><figcaption>Figure 1: Revenue</figcaption></figure>\
+             </body></html>",
+        );
+        let img = doc
+            .elements
+            .iter()
+            .find(|e| e.kind == ElementKind::Image)
+            .unwrap();
+        assert_eq!(img.text, "chart.png");
+        assert!(img.attributes.contains_key("associated_caption_id"));
+
+        let cap = doc
+            .elements
+            .iter()
+            .find(|e| e.kind == ElementKind::Paragraph && e.text == "Figure 1: Revenue")
+            .unwrap();
+        assert!(cap.attributes.contains_key("associated_image_id"));
     }
 
     #[test]

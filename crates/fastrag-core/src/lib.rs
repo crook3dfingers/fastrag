@@ -7,7 +7,7 @@ pub mod language;
 pub mod output;
 
 pub use chunking::{Chunk, ChunkingStrategy, default_separators};
-pub use document::{Document, Element, ElementKind, Metadata};
+pub use document::{Document, Element, ElementKind, Metadata, is_caption_text};
 pub use error::FastRagError;
 pub use format::{FileFormat, SourceInfo};
 pub use output::OutputFormat;

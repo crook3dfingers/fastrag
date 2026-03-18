@@ -153,6 +153,99 @@ impl Document {
     }
 }
 
+/// Check if text looks like a figure/table caption.
+pub fn is_caption_text(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    let trimmed = lower.trim_start();
+    let prefixes = [
+        "figure ",
+        "figure\u{a0}",
+        "fig. ",
+        "fig ",
+        "table ",
+        "image ",
+        "illustration ",
+        "plate ",
+    ];
+    for prefix in &prefixes {
+        if let Some(rest) = trimmed.strip_prefix(prefix)
+            && rest.starts_with(|c: char| c.is_ascii_digit())
+        {
+            return true;
+        }
+    }
+    false
+}
+
+impl Document {
+    /// Associate Image elements with adjacent caption paragraphs.
+    /// Requires IDs to be assigned (call `build_hierarchy()` first).
+    pub fn associate_captions(&mut self) {
+        let len = self.elements.len();
+        let mut associated: Vec<bool> = vec![false; len];
+
+        for i in 0..len {
+            if self.elements[i].kind != ElementKind::Image || associated[i] {
+                continue;
+            }
+
+            // Scan window i-3..i+3 for caption paragraphs
+            let start = i.saturating_sub(3);
+            let end = (i + 4).min(len);
+
+            // Prefer after, then before
+            let mut best: Option<usize> = None;
+            let mut best_distance: usize = usize::MAX;
+            let mut prefer_after = true;
+
+            for (j, is_assoc) in associated.iter().enumerate().take(end).skip(start) {
+                if j == i || *is_assoc {
+                    continue;
+                }
+                if self.elements[j].kind != ElementKind::Paragraph {
+                    continue;
+                }
+                if !is_caption_text(&self.elements[j].text) {
+                    continue;
+                }
+
+                let distance = j.abs_diff(i);
+                let is_after = j > i;
+
+                let is_better = match best {
+                    None => true,
+                    Some(_) => {
+                        if is_after && !prefer_after {
+                            distance <= best_distance
+                        } else {
+                            distance < best_distance
+                        }
+                    }
+                };
+
+                if is_better {
+                    best = Some(j);
+                    best_distance = distance;
+                    prefer_after = is_after;
+                }
+            }
+
+            if let Some(caption_idx) = best {
+                let image_id = self.elements[i].id.clone();
+                let caption_id = self.elements[caption_idx].id.clone();
+                self.elements[i]
+                    .attributes
+                    .insert("associated_caption_id".to_string(), caption_id);
+                self.elements[caption_idx]
+                    .attributes
+                    .insert("associated_image_id".to_string(), image_id);
+                associated[i] = true;
+                associated[caption_idx] = true;
+            }
+        }
+    }
+}
+
 /// The kind of structural element.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -330,6 +423,95 @@ mod tests {
         assert!(
             json.contains("\"children\":[\"el-1\"]"),
             "missing children in json: {json}"
+        );
+    }
+
+    #[test]
+    fn is_caption_text_matches_common_patterns() {
+        assert!(is_caption_text("Figure 1: Revenue Growth"));
+        assert!(is_caption_text("Fig. 2. Comparison"));
+        assert!(is_caption_text("Table 3: Results"));
+        assert!(is_caption_text("Image 4 - Photo"));
+        assert!(is_caption_text("Illustration 1: Diagram"));
+        assert!(is_caption_text("Plate 5: Specimen"));
+        assert!(is_caption_text("fig 7 something"));
+        assert!(is_caption_text("FIGURE 1: UPPERCASE"));
+    }
+
+    #[test]
+    fn is_caption_text_rejects_normal_text() {
+        assert!(!is_caption_text("Regular paragraph"));
+        assert!(!is_caption_text("The figure below shows"));
+        assert!(!is_caption_text("Table of contents"));
+        assert!(!is_caption_text(""));
+        assert!(!is_caption_text("Figure without number"));
+    }
+
+    #[test]
+    fn associate_captions_links_adjacent() {
+        let mut doc = Document {
+            metadata: Metadata::new(FileFormat::Html),
+            elements: vec![
+                Element::new(ElementKind::Image, "photo.jpg"),
+                Element::new(ElementKind::Paragraph, "Figure 1: A chart"),
+            ],
+        };
+        doc.build_hierarchy();
+        doc.associate_captions();
+        assert_eq!(
+            doc.elements[0].attributes.get("associated_caption_id"),
+            Some(&"el-1".to_string())
+        );
+        assert_eq!(
+            doc.elements[1].attributes.get("associated_image_id"),
+            Some(&"el-0".to_string())
+        );
+    }
+
+    #[test]
+    fn associate_captions_ignores_distant() {
+        let mut doc = Document {
+            metadata: Metadata::new(FileFormat::Html),
+            elements: vec![
+                Element::new(ElementKind::Image, "photo.jpg"),
+                Element::new(ElementKind::Paragraph, "a"),
+                Element::new(ElementKind::Paragraph, "b"),
+                Element::new(ElementKind::Paragraph, "c"),
+                Element::new(ElementKind::Paragraph, "d"),
+                Element::new(ElementKind::Paragraph, "e"),
+                Element::new(ElementKind::Paragraph, "f"),
+                Element::new(ElementKind::Paragraph, "g"),
+                Element::new(ElementKind::Paragraph, "h"),
+                Element::new(ElementKind::Paragraph, "i"),
+                Element::new(ElementKind::Paragraph, "Figure 1: distant caption"),
+            ],
+        };
+        doc.build_hierarchy();
+        doc.associate_captions();
+        assert!(
+            doc.elements[0]
+                .attributes
+                .get("associated_caption_id")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn associate_captions_prefers_after_over_before() {
+        let mut doc = Document {
+            metadata: Metadata::new(FileFormat::Html),
+            elements: vec![
+                Element::new(ElementKind::Paragraph, "Figure 1: before"),
+                Element::new(ElementKind::Image, "photo.jpg"),
+                Element::new(ElementKind::Paragraph, "Figure 2: after"),
+            ],
+        };
+        doc.build_hierarchy();
+        doc.associate_captions();
+        // Should prefer the one after
+        assert_eq!(
+            doc.elements[1].attributes.get("associated_caption_id"),
+            Some(&"el-2".to_string())
         );
     }
 
