@@ -73,6 +73,7 @@ pub enum OutputFormatArg {
     Markdown,
     Json,
     Text,
+    Html,
 }
 
 #[derive(Clone, ValueEnum, PartialEq)]

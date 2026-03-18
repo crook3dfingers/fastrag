@@ -34,6 +34,7 @@ async fn main() {
                 OutputFormatArg::Markdown => OutputFormat::Markdown,
                 OutputFormatArg::Json => OutputFormat::Json,
                 OutputFormatArg::Text => OutputFormat::PlainText,
+                OutputFormatArg::Html => OutputFormat::Html,
             };
 
             let chunking = match chunk_strategy {
@@ -277,6 +278,12 @@ mod tests {
             OutputFormat::PlainText,
         );
         assert_eq!(p, PathBuf::from("/out/sample.csv.txt"));
+    }
+
+    #[test]
+    fn output_path_html() {
+        let p = output_path(Path::new("data/sample.csv"), "/out", OutputFormat::Html);
+        assert_eq!(p, PathBuf::from("/out/sample.csv.html"));
     }
 
     #[test]

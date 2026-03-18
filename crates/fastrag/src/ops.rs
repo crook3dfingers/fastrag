@@ -265,6 +265,12 @@ pub fn render_chunks(chunks: &[crate::Chunk], format: OutputFormat) -> String {
                 out.push_str(&chunk.text);
                 out.push_str("\n\n");
             }
+            OutputFormat::Html => {
+                if let Some(ref section) = chunk.section {
+                    out.push_str(&format!("<h2>{section}</h2>\n"));
+                }
+                out.push_str(&format!("<p>{}</p>\n<hr>\n", chunk.text));
+            }
         }
     }
     out.trim_end().to_string()
@@ -278,6 +284,7 @@ pub fn render_document(doc: &Document, format: OutputFormat) -> String {
             .to_json()
             .unwrap_or_else(|e| format!("{{\"error\": \"{e}\"}}")),
         OutputFormat::PlainText => doc.to_plain_text(),
+        OutputFormat::Html => doc.to_html(),
     }
 }
 
@@ -287,6 +294,7 @@ pub fn output_path(input: &Path, output_dir: &str, format: OutputFormat) -> Path
         OutputFormat::Markdown => "md",
         OutputFormat::Json => "json",
         OutputFormat::PlainText => "txt",
+        OutputFormat::Html => "html",
     };
     let filename = input.file_name().unwrap_or_default();
     PathBuf::from(output_dir).join(format!("{}.{out_ext}", filename.to_string_lossy()))

@@ -97,6 +97,7 @@ fn parse_output_format(format: Option<&str>) -> OutputFormat {
     match format.map(|s| s.to_lowercase()).as_deref() {
         Some("json") => OutputFormat::Json,
         Some("text") | Some("plain") | Some("plaintext") => OutputFormat::PlainText,
+        Some("html") => OutputFormat::Html,
         _ => OutputFormat::Markdown,
     }
 }
@@ -312,6 +313,7 @@ mod tests {
             OutputFormat::PlainText
         );
         assert_eq!(parse_output_format(Some("JSON")), OutputFormat::Json);
+        assert_eq!(parse_output_format(Some("html")), OutputFormat::Html);
     }
 
     #[test]
