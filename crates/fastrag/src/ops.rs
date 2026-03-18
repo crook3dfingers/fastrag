@@ -199,20 +199,15 @@ pub fn chunk_file_with_context(
     })
 }
 
+/// An iterator over streamed elements.
+pub type ElementStream = Box<dyn Iterator<Item = Result<Element, FastRagError>>>;
+
 /// Stream elements from a file incrementally.
 ///
 /// Unlike `parse_single`, streaming mode skips `build_hierarchy()` and
 /// `associate_captions()` — elements are yielded as they are extracted.
 /// Returns `(format_name, element_iterator)`.
-pub fn parse_stream(
-    path: &Path,
-) -> Result<
-    (
-        String,
-        Box<dyn Iterator<Item = Result<Element, FastRagError>>>,
-    ),
-    FastRagError,
-> {
+pub fn parse_stream(path: &Path) -> Result<(String, ElementStream), FastRagError> {
     let registry = ParserRegistry::default();
     let (format, elements) = registry.stream_file(path)?;
     Ok((format.to_string(), Box::new(elements.into_iter())))
