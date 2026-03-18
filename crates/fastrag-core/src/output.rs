@@ -67,6 +67,21 @@ impl Document {
                 ElementKind::HorizontalRule => {
                     out.push_str("---\n\n");
                 }
+                ElementKind::FormField => {
+                    let name = element
+                        .attributes
+                        .get("field_name")
+                        .map_or("", |s| s.as_str());
+                    let field_type = element
+                        .attributes
+                        .get("field_type")
+                        .map_or("", |s| s.as_str());
+                    if field_type.is_empty() {
+                        out.push_str(&format!("**{name}**: {}\n\n", element.text));
+                    } else {
+                        out.push_str(&format!("**{name}** ({field_type}): {}\n\n", element.text));
+                    }
+                }
                 ElementKind::Unknown => {
                     out.push_str(&element.text);
                     out.push_str("\n\n");
@@ -170,6 +185,28 @@ impl Document {
                 }
                 ElementKind::HorizontalRule => {
                     out.push_str("<hr>\n");
+                }
+                ElementKind::FormField => {
+                    let name = element
+                        .attributes
+                        .get("field_name")
+                        .map_or("", |s| s.as_str());
+                    let field_type = element
+                        .attributes
+                        .get("field_type")
+                        .map_or("", |s| s.as_str());
+                    out.push_str("<dl>");
+                    if field_type.is_empty() {
+                        out.push_str(&format!("<dt>{}</dt>", escape_html(name)));
+                    } else {
+                        out.push_str(&format!(
+                            "<dt>{} ({})</dt>",
+                            escape_html(name),
+                            escape_html(field_type)
+                        ));
+                    }
+                    out.push_str(&format!("<dd>{}</dd>", escape_html(&element.text)));
+                    out.push_str("</dl>\n");
                 }
                 ElementKind::Unknown => {
                     out.push_str(&format!("<p>{}</p>\n", escape_html(&element.text)));
@@ -505,6 +542,42 @@ mod tests {
         assert!(html.contains("<body>"), "got: {html}");
         assert!(html.contains("</body>"), "got: {html}");
         assert!(html.contains("</html>"), "got: {html}");
+    }
+
+    // --- FormField rendering ---
+
+    #[test]
+    fn markdown_form_field_renders() {
+        let mut el = Element::new(ElementKind::FormField, "John Doe");
+        el.attributes
+            .insert("field_name".to_string(), "Full Name".to_string());
+        el.attributes
+            .insert("field_type".to_string(), "Text".to_string());
+        let doc = doc_with(vec![el]);
+        let md = doc.to_markdown();
+        assert!(md.contains("**Full Name** (Text): John Doe"), "got: {md}");
+    }
+
+    #[test]
+    fn html_form_field_renders() {
+        let mut el = Element::new(ElementKind::FormField, "John Doe");
+        el.attributes
+            .insert("field_name".to_string(), "Full Name".to_string());
+        el.attributes
+            .insert("field_type".to_string(), "Text".to_string());
+        let doc = doc_with(vec![el]);
+        let html = doc.to_html();
+        assert!(html.contains("<dl>"), "got: {html}");
+        assert!(html.contains("<dt>Full Name (Text)</dt>"), "got: {html}");
+        assert!(html.contains("<dd>John Doe</dd>"), "got: {html}");
+        assert!(html.contains("</dl>"), "got: {html}");
+    }
+
+    #[test]
+    fn form_field_element_kind_exists() {
+        let el = Element::new(ElementKind::FormField, "value");
+        assert_eq!(el.kind, ElementKind::FormField);
+        assert_eq!(el.text, "value");
     }
 
     // --- to_jsonl ---

@@ -278,6 +278,7 @@ pub enum ElementKind {
     Image,
     BlockQuote,
     HorizontalRule,
+    FormField,
     Unknown,
 }
 

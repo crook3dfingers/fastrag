@@ -13,6 +13,9 @@ pub mod images;
 #[cfg(feature = "table-detect")]
 pub mod table;
 
+#[cfg(feature = "forms")]
+pub mod forms;
+
 #[cfg(feature = "ocr")]
 pub mod ocr;
 
@@ -218,6 +221,12 @@ impl Parser for PdfParser {
 
         #[cfg(feature = "table-detect")]
         table::merge_continued_tables(&mut elements);
+
+        #[cfg(feature = "forms")]
+        {
+            let form_elements = forms::extract_form_fields(&pdf, &resolver);
+            elements.extend(form_elements);
+        }
 
         Ok(Document { metadata, elements })
     }
