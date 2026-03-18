@@ -16,6 +16,9 @@ pub mod table;
 #[cfg(feature = "forms")]
 pub mod forms;
 
+#[cfg(feature = "footnotes")]
+pub mod footnotes;
+
 #[cfg(feature = "ocr")]
 pub mod ocr;
 
@@ -115,14 +118,60 @@ fn extract_page_elements(
         let (table_elements, remaining) = table::extract_tables_from_ops(&ops, page_num);
         if !table_elements.is_empty() {
             elements.extend(table_elements);
-            // Build paragraphs from remaining (non-table) text
-            for pt in &remaining {
-                elements.push(
-                    Element::new(ElementKind::Paragraph, pt.text.clone())
-                        .with_page(page_num as usize + 1),
-                );
+
+            // Footnote detection on remaining text (after tables removed)
+            #[cfg(feature = "footnotes")]
+            {
+                let page_height = page
+                    .media_box()
+                    .map(|mb| mb.top - mb.bottom)
+                    .unwrap_or(792.0);
+                let (fn_elements, body_remaining) =
+                    footnotes::extract_footnotes(&remaining, page_num, page_height);
+                elements.extend(fn_elements);
+                for pt in &body_remaining {
+                    elements.push(
+                        Element::new(ElementKind::Paragraph, pt.text.clone())
+                            .with_page(page_num as usize + 1),
+                    );
+                }
+                return Ok(elements);
             }
-            return Ok(elements);
+
+            #[cfg(not(feature = "footnotes"))]
+            {
+                for pt in &remaining {
+                    elements.push(
+                        Element::new(ElementKind::Paragraph, pt.text.clone())
+                            .with_page(page_num as usize + 1),
+                    );
+                }
+                return Ok(elements);
+            }
+        }
+    }
+
+    // Footnote detection without tables (footnotes implies table-detect for PositionedText)
+    #[cfg(feature = "footnotes")]
+    {
+        let positioned = table::collect_positioned_text(&ops);
+        if !positioned.is_empty() {
+            let page_height = page
+                .media_box()
+                .map(|mb| mb.top - mb.bottom)
+                .unwrap_or(792.0);
+            let (fn_elements, remaining) =
+                footnotes::extract_footnotes(&positioned, page_num, page_height);
+            if !fn_elements.is_empty() {
+                elements.extend(fn_elements);
+                for pt in &remaining {
+                    elements.push(
+                        Element::new(ElementKind::Paragraph, pt.text.clone())
+                            .with_page(page_num as usize + 1),
+                    );
+                }
+                return Ok(elements);
+            }
         }
     }
 
