@@ -109,9 +109,9 @@ Every test must have at least one assertion on a **concrete value** derived from
 
 ## Skills (`.claude/skills/`)
 
-Reusable prompts that keep main-context token usage low. To invoke a skill: read the skill file — no substitution needed — pass the skill file content directly as the `prompt` to a background Haiku Agent call (`model=haiku`, `run_in_background=true`). The task completion notification signals pass/fail.
+Reusable prompts that keep main-context token usage low. To invoke a skill: read the skill file — no substitution needed — pass the skill file content directly as the `prompt` to a Haiku Agent call (`model=haiku`). Unless the table below specifies "foreground", use `run_in_background=true`.
 
 | Skill file | Model | When to use |
 |---|---|---|
 | `ci-watcher.md` | Haiku, background | After every `git push` — **mandatory** |
-| `doc-editor/SKILL.md` | (inherits) | Before every `Edit` or `Write` to a `.md` file — **mandatory** |
+| `doc-editor/SKILL.md` | Haiku, foreground | Before every `Edit` or `Write` to a `.md` file — **mandatory** |
