@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "fastrag": {
+      "type": "stdio",
+      "command": "fastrag",
+      "args": ["serve"]
+    }
+  }
+}
