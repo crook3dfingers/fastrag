@@ -291,7 +291,7 @@ mod tests {
     fn collect_files_fixtures() {
         let fixtures = format!("{}/../tests/fixtures", env!("CARGO_MANIFEST_DIR"));
         let files = collect_files(Path::new(&fixtures));
-        assert_eq!(files.len(), 21); // txt, csv, md, html (x2), pdf (x9), xml, xlsx, docx, pptx, epub, rtf, eml
+        assert_eq!(files.len(), 22); // txt, csv, md, html (x2), pdf (x10), xml, xlsx, docx, pptx, epub, rtf, eml
     }
 
     #[test]

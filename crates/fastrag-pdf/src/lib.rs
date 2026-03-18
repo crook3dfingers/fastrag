@@ -19,6 +19,9 @@ pub mod forms;
 #[cfg(feature = "footnotes")]
 pub mod footnotes;
 
+#[cfg(feature = "column-detect")]
+pub mod columns;
+
 #[cfg(feature = "ocr")]
 pub mod ocr;
 
@@ -119,6 +122,10 @@ fn extract_page_elements(
         if !table_elements.is_empty() {
             elements.extend(table_elements);
 
+            // Column reorder remaining text
+            #[cfg(feature = "column-detect")]
+            let remaining = columns::reorder_by_columns(remaining);
+
             // Footnote detection on remaining text (after tables removed)
             #[cfg(feature = "footnotes")]
             {
@@ -154,7 +161,11 @@ fn extract_page_elements(
     // Footnote detection without tables (footnotes implies table-detect for PositionedText)
     #[cfg(feature = "footnotes")]
     {
-        let positioned = table::collect_positioned_text(&ops);
+        let mut positioned = table::collect_positioned_text(&ops);
+        #[cfg(feature = "column-detect")]
+        {
+            positioned = columns::reorder_by_columns(positioned);
+        }
         if !positioned.is_empty() {
             let page_height = page
                 .media_box()
@@ -165,6 +176,27 @@ fn extract_page_elements(
             if !fn_elements.is_empty() {
                 elements.extend(fn_elements);
                 for pt in &remaining {
+                    elements.push(
+                        Element::new(ElementKind::Paragraph, pt.text.clone())
+                            .with_page(page_num as usize + 1),
+                    );
+                }
+                return Ok(elements);
+            }
+        }
+    }
+
+    // Column reorder: use positioned text for paragraph extraction in column order
+    // Only activates when multiple columns are detected; single-column falls through
+    // to default paragraph extraction (which preserves bounding boxes).
+    #[cfg(all(feature = "column-detect", not(feature = "footnotes")))]
+    {
+        let positioned = table::collect_positioned_text(&ops);
+        if !positioned.is_empty() {
+            let detected = columns::detect_columns(&positioned);
+            if detected.len() > 1 {
+                let reordered = columns::reorder_by_columns(positioned);
+                for pt in &reordered {
                     elements.push(
                         Element::new(ElementKind::Paragraph, pt.text.clone())
                             .with_page(page_num as usize + 1),

@@ -451,7 +451,7 @@ mod tests {
     fn collect_files_from_fixtures() {
         let fixtures = format!("{}/../../tests/fixtures", env!("CARGO_MANIFEST_DIR"));
         let files = collect_files(Path::new(&fixtures));
-        assert_eq!(files.len(), 21);
+        assert_eq!(files.len(), 22);
     }
 
     #[test]
