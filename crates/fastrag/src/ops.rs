@@ -73,6 +73,7 @@ pub fn parse_single_with_context(
     #[cfg(feature = "language-detection")]
     if detect_language {
         doc.detect_language();
+        doc.detect_element_languages();
     }
     #[cfg(not(feature = "language-detection"))]
     let _ = detect_language;

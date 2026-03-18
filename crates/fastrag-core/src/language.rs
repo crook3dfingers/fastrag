@@ -21,6 +21,37 @@ impl Document {
         }
     }
 
+    /// Detect language per element and store in element attributes.
+    /// Only processes text-heavy element kinds (Paragraph, Title, Heading, BlockQuote, ListItem)
+    /// with at least 20 characters.
+    pub fn detect_element_languages(&mut self) {
+        for element in &mut self.elements {
+            if !matches!(
+                element.kind,
+                ElementKind::Paragraph
+                    | ElementKind::Title
+                    | ElementKind::Heading
+                    | ElementKind::BlockQuote
+                    | ElementKind::ListItem
+            ) {
+                continue;
+            }
+            if element.text.len() < 20 {
+                continue;
+            }
+            if let Some(info) = whatlang::detect(&element.text) {
+                let code = lang_to_iso639_1(info.lang());
+                element
+                    .attributes
+                    .insert("language".to_string(), code.to_string());
+                element.attributes.insert(
+                    "language_confidence".to_string(),
+                    format!("{:.4}", info.confidence()),
+                );
+            }
+        }
+    }
+
     /// Collect text from Paragraph, Title, and Heading elements (skip Code and Table).
     fn collect_text_sample(&self, max_chars: usize) -> String {
         let mut sample = String::new();
@@ -139,6 +170,78 @@ mod tests {
             .parse()
             .expect("confidence should be parseable as float");
         assert!(val > 0.0 && val <= 1.0);
+    }
+
+    // --- detect_element_languages ---
+
+    #[test]
+    fn detect_element_languages_english() {
+        let mut doc = doc_with(vec![
+            Element::new(
+                ElementKind::Paragraph,
+                "The quick brown fox jumps over the lazy dog and runs across the field.",
+            ),
+            Element::new(
+                ElementKind::Title,
+                "An Introduction to English Language Testing Methods",
+            ),
+        ]);
+        doc.detect_element_languages();
+        assert_eq!(
+            doc.elements[0].attributes.get("language"),
+            Some(&"en".to_string())
+        );
+        assert_eq!(
+            doc.elements[1].attributes.get("language"),
+            Some(&"en".to_string())
+        );
+    }
+
+    #[test]
+    fn detect_element_languages_skips_short() {
+        let mut doc = doc_with(vec![Element::new(ElementKind::Paragraph, "Short text.")]);
+        doc.detect_element_languages();
+        assert!(doc.elements[0].attributes.get("language").is_none());
+    }
+
+    #[test]
+    fn detect_element_languages_skips_code_and_table() {
+        let mut doc = doc_with(vec![
+            Element::new(
+                ElementKind::Code,
+                "fn main() { println!(\"Hello world this is a long test string\"); }",
+            ),
+            Element::new(
+                ElementKind::Table,
+                "| Column A | Column B | Column C | Column D |",
+            ),
+        ]);
+        doc.detect_element_languages();
+        assert!(doc.elements[0].attributes.get("language").is_none());
+        assert!(doc.elements[1].attributes.get("language").is_none());
+    }
+
+    #[test]
+    fn detect_element_languages_mixed() {
+        let mut doc = doc_with(vec![
+            Element::new(
+                ElementKind::Paragraph,
+                "The quick brown fox jumps over the lazy dog and runs across the open field.",
+            ),
+            Element::new(
+                ElementKind::Paragraph,
+                "Dies ist ein deutscher Satz. Die deutsche Sprache ist eine westgermanische Sprache.",
+            ),
+        ]);
+        doc.detect_element_languages();
+        assert_eq!(
+            doc.elements[0].attributes.get("language"),
+            Some(&"en".to_string())
+        );
+        assert_eq!(
+            doc.elements[1].attributes.get("language"),
+            Some(&"de".to_string())
+        );
     }
 
     #[test]
