@@ -8,8 +8,8 @@ FastRAG is a Rust-based, single-binary document parser that replaces Python's `u
 
 - **Blazing fast** — native Rust performance, no Python/Java/Tika overhead
 - **Single binary** — no runtime dependencies to install
-- **Multiple formats** — PDF, HTML, Markdown, CSV, XML, DOCX, XLSX, PPTX, plain text
-- **Structured output** — Markdown, JSON, or plain text with rich metadata
+- **Multiple formats** — PDF, HTML, Markdown, CSV, XML, DOCX, XLSX, PPTX, EPUB, RTF, Email (EML), plain text
+- **Structured output** — Markdown, JSON, HTML, or plain text with rich metadata
 - **Parallel processing** — batch parse entire directories with configurable workers
 - **PDF intelligence** — optional table detection, image extraction, and OCR for scanned pages
 
@@ -81,6 +81,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 | DOCX     | v0.1   | `fastrag-docx` |
 | XLSX     | v0.1   | `fastrag-xlsx` |
 | PPTX     | v0.1   | `fastrag-pptx` |
+| EPUB     | v0.1   | `fastrag-epub` |
+| RTF      | v0.1   | `fastrag-rtf` |
+| Email    | v0.1   | `fastrag-email` |
 
 ## PDF Feature Flags
 
@@ -110,6 +113,7 @@ FastRAG provides three chunking strategies for splitting parsed documents into R
 | `basic` | Accumulates elements up to the character limit, then starts a new chunk |
 | `by-title` | Splits on Title/Heading boundaries, sub-chunks large sections |
 | `recursive` | Recursive character splitting — tries separators in order, falling back to finer granularity |
+| `semantic` | Splits on embedding similarity boundaries — groups similar sentences together, splits where topics change |
 
 All strategies support **chunk overlap**, which repeats characters from the end of one chunk at the start of the next, preserving context across boundaries.
 
@@ -127,6 +131,9 @@ fastrag parse document.pdf --chunk-strategy recursive --chunk-size 500
 
 # Recursive with custom separators (comma-separated, use \n for newline)
 fastrag parse document.pdf --chunk-strategy recursive --chunk-size 500 --chunk-separators "\n\n,\n,. , ,"
+
+# Semantic chunking with similarity threshold
+fastrag parse document.pdf --chunk-strategy semantic --chunk-size 1000 --similarity-threshold 0.3
 ```
 
 ### Library
@@ -147,6 +154,13 @@ let chunks = doc.chunk(&ChunkingStrategy::RecursiveCharacter {
     max_characters: 500,
     overlap: 100,
     separators: default_separators(),
+});
+
+// Semantic chunking
+let chunks = doc.chunk(&ChunkingStrategy::Semantic {
+    max_characters: 1000,
+    similarity_threshold: Some(0.3),
+    percentile_threshold: None,
 });
 
 for chunk in &chunks {
