@@ -61,13 +61,13 @@ pub struct ChunkDocumentParams {
 
 #[derive(Debug, Clone)]
 pub struct FastRagMcpServer {
-    tool_router: ToolRouter<Self>,
+    _tool_router: ToolRouter<Self>,
 }
 
 impl FastRagMcpServer {
     pub fn new() -> Self {
         Self {
-            tool_router: Self::tool_router(),
+            _tool_router: Self::tool_router(),
         }
     }
 }
