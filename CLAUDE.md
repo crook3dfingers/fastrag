@@ -9,6 +9,19 @@ cargo fmt --check            # Format check
 cargo build --release        # Release build (binary at target/release/fastrag)
 ```
 
+### PDF Feature Flags
+
+The PDF parser has optional feature flags for advanced extraction:
+
+```bash
+cargo test -p fastrag-pdf --features images           # Image extraction tests
+cargo test -p fastrag-pdf --features table-detect      # Table detection tests
+cargo test --workspace --features pdf-images,pdf-table-detect  # Full feature set
+cargo bench -p fastrag-pdf --bench pdf_parsing --features images,table-detect  # Benchmarks
+```
+
+The OCR feature (`--features ocr`) requires the `tesseract` library and `pdfium-render` (statically linked). These dependencies must be available in the build environment.
+
 ## Architecture
 
 - Workspace with crates in `crates/` and CLI in `fastrag-cli/`

@@ -2,15 +2,16 @@
 
 **100x faster document parsing for AI/RAG pipelines.**
 
-FastRAG is a Rust-based, single-binary document parser that replaces Python's `unstructured` with dramatically better performance and zero runtime dependencies.
+FastRAG is a Rust-based, single-binary document parser that replaces Python's `unstructured` with better performance and zero runtime dependencies.
 
 ## Features
 
 - **Blazing fast** — native Rust performance, no Python/Java/Tika overhead
 - **Single binary** — no runtime dependencies to install
-- **Multiple formats** — PDF, HTML, Markdown, CSV, plain text (64+ planned)
+- **Multiple formats** — PDF, HTML, Markdown, CSV, XML, DOCX, XLSX, PPTX, plain text
 - **Structured output** — Markdown, JSON, or plain text with rich metadata
 - **Parallel processing** — batch parse entire directories with configurable workers
+- **PDF intelligence** — optional table detection, image extraction, and OCR for scanned pages
 
 ## Installation
 
@@ -76,9 +77,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 | Markdown | v0.1   | `fastrag-markdown` |
 | CSV      | v0.1   | `fastrag-csv` |
 | Text     | v0.1   | `fastrag-text` |
-| DOCX     | Planned | — |
-| XLSX     | Planned | — |
-| PPTX     | Planned | — |
+| XML      | v0.1   | `fastrag-xml` |
+| DOCX     | v0.1   | `fastrag-docx` |
+| XLSX     | v0.1   | `fastrag-xlsx` |
+| PPTX     | v0.1   | `fastrag-pptx` |
+
+## PDF Feature Flags
+
+The PDF parser supports optional capabilities via feature flags:
+
+| Feature | Flag | Dependencies | Description |
+|---------|------|-------------|-------------|
+| Table detection | `pdf-table-detect` | None | Detects tables from text positions, outputs markdown tables |
+| Image extraction | `pdf-images` | None | Extracts embedded images with chart/figure classification |
+| OCR | `pdf-ocr` | `pdfium-render`, `tesseract` | OCR for scanned (image-only) pages |
+
+Enable in your `Cargo.toml`:
+
+```toml
+[dependencies]
+fastrag = { version = "0.1", features = ["pdf-images", "pdf-table-detect"] }
+```
+
+OCR requires system packages (`tesseract-ocr`, `tesseract-ocr-eng`) and links against PDFium statically.
 
 ## Architecture
 
@@ -90,6 +111,14 @@ FastRAG uses a workspace of small, focused crates:
 - **`fastrag-cli`** — Command-line interface
 
 Each parser is feature-gated, so you only compile what you need.
+
+## Benchmarks
+
+The PDF parser includes criterion benchmarks:
+
+```bash
+cargo bench -p fastrag-pdf --bench pdf_parsing --features images,table-detect
+```
 
 ## License
 
