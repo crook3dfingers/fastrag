@@ -16,6 +16,8 @@ The PDF parser has optional feature flags for advanced extraction:
 ```bash
 cargo test -p fastrag-pdf --features images           # Image extraction tests
 cargo test -p fastrag-pdf --features table-detect      # Table detection tests
+cargo test -p fastrag-pdf --features footnotes         # Footnote extraction tests
+cargo test -p fastrag-pdf --features column-detect     # Column detection tests
 cargo test --workspace --features pdf-images,pdf-table-detect  # Full feature set
 cargo bench -p fastrag-pdf --bench pdf_parsing --features images,table-detect  # Benchmarks
 ```

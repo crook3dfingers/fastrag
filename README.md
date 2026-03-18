@@ -12,8 +12,10 @@ FastRAG is a Rust-based, single-binary document parser that replaces Python's `u
 - **Structured output** — Markdown, JSON, JSONL, HTML, or plain text with rich metadata
 - **Language detection** — document-level and per-element language identification
 - **Parallel processing** — batch parse entire directories with configurable workers
-- **PDF intelligence** — optional table detection, image extraction, form field extraction, and OCR for scanned pages
-- **Footnote extraction** — detects footnotes/endnotes in HTML documents
+- **PDF intelligence** — optional table detection, image extraction, form field extraction, footnote extraction, multi-column reading order, and OCR for scanned pages
+- **Footnote extraction** — detects footnotes/endnotes in HTML documents and in PDF pages
+- **Multi-column PDF layout** — reorders text from multi-column PDF layouts into correct left-to-right reading order (feature flag: `pdf-column-detect`)
+- **Streaming output** — `--stream` flag emits elements incrementally as JSONL for low-latency pipelines
 
 ## Installation
 
@@ -124,6 +126,8 @@ The PDF parser supports optional capabilities via feature flags:
 | Table detection | `pdf-table-detect` | None | Detects tables from text positions, outputs markdown tables |
 | Image extraction | `pdf-images` | None | Extracts embedded images with chart/figure classification |
 | Form fields | `pdf-forms` | None | Extracts interactive form fields (name, type, value) from AcroForm dictionaries |
+| Footnote extraction | `pdf-footnotes` | `pdf-table-detect` | Detects footnotes in bottom 15% of page using numeric/bracket/superscript markers |
+| Column detection | `pdf-column-detect` | `pdf-table-detect` | Reorders multi-column text into left-to-right reading order |
 | OCR | `pdf-ocr` | `pdfium-render`, `tesseract` | OCR for scanned (image-only) pages |
 
 Enable in your `Cargo.toml`:
@@ -143,6 +147,18 @@ The HTML parser extracts footnotes and endnotes from common patterns:
 - Inline references: `<sup><a href="#fn...">` patterns in body paragraphs
 
 Footnotes become `Footnote` elements with a `reference_id` attribute. Paragraphs containing footnote references get a `footnote_refs` attribute listing the referenced IDs.
+
+## Streaming Output
+
+The `--stream` flag writes each element as a separate JSONL line to stdout, flushing after each element:
+
+```bash
+fastrag parse document.pdf --stream
+```
+
+Streaming mode skips hierarchy building and caption association, yielding elements as they are extracted from each page. This is useful for large documents where you want to process elements as they arrive.
+
+The MCP `parse_file` tool also accepts a `stream` parameter.
 
 ## Chunking for RAG
 
