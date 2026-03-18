@@ -41,6 +41,9 @@ impl Default for ParserRegistry {
         #[cfg(feature = "pptx")]
         registry.register(Box::new(fastrag_pptx::PptxParser));
 
+        #[cfg(feature = "epub")]
+        registry.register(Box::new(fastrag_epub::EpubParser));
+
         registry
     }
 }
@@ -166,6 +169,6 @@ mod tests {
     #[test]
     fn default_registry_has_9_formats() {
         let reg = ParserRegistry::default();
-        assert_eq!(reg.supported_formats().len(), 9);
+        assert_eq!(reg.supported_formats().len(), 10);
     }
 }

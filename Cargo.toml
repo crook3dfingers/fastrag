@@ -11,6 +11,7 @@ members = [
     "crates/fastrag-xlsx",
     "crates/fastrag-docx",
     "crates/fastrag-pptx",
+    "crates/fastrag-epub",
     "crates/fastrag",
     "crates/fastrag-mcp",
     "fastrag-cli",
@@ -33,6 +34,7 @@ fastrag-xml = { path = "crates/fastrag-xml", version = "0.1.0" }
 fastrag-xlsx = { path = "crates/fastrag-xlsx", version = "0.1.0" }
 fastrag-docx = { path = "crates/fastrag-docx", version = "0.1.0" }
 fastrag-pptx = { path = "crates/fastrag-pptx", version = "0.1.0" }
+fastrag-epub = { path = "crates/fastrag-epub", version = "0.1.0" }
 fastrag = { path = "crates/fastrag", version = "0.1.0" }
 fastrag-mcp = { path = "crates/fastrag-mcp", version = "0.1.0" }
 rayon = "1"

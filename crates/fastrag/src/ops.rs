@@ -193,6 +193,7 @@ pub fn collect_files(dir: &Path) -> Vec<PathBuf> {
                             | "pptx"
                             | "xlsx"
                             | "xml"
+                            | "epub"
                     ) {
                         files.push(path);
                     }
@@ -272,6 +273,7 @@ fn extensions_for_format(format: &FileFormat) -> Vec<String> {
         FileFormat::Pptx => vec!["pptx".into()],
         FileFormat::Xlsx => vec!["xlsx".into()],
         FileFormat::Xml => vec!["xml".into()],
+        FileFormat::Epub => vec!["epub".into()],
         FileFormat::Unknown => vec![],
     }
 }
@@ -315,7 +317,7 @@ mod tests {
     #[test]
     fn list_formats_returns_9() {
         let formats = list_formats();
-        assert_eq!(formats.len(), 9);
+        assert_eq!(formats.len(), 10);
         let names: Vec<&str> = formats.iter().map(|f| f.name.as_str()).collect();
         assert!(names.contains(&"PDF"));
         assert!(names.contains(&"HTML"));
@@ -361,7 +363,7 @@ mod tests {
     fn collect_files_from_fixtures() {
         let fixtures = format!("{}/../../tests/fixtures", env!("CARGO_MANIFEST_DIR"));
         let files = collect_files(Path::new(&fixtures));
-        assert_eq!(files.len(), 15);
+        assert_eq!(files.len(), 16);
     }
 
     #[test]

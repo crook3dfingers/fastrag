@@ -291,7 +291,7 @@ mod tests {
         let result = server.list_formats();
         let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
         let arr = parsed.as_array().unwrap();
-        assert_eq!(arr.len(), 9);
+        assert_eq!(arr.len(), 10);
         let names: Vec<&str> = arr.iter().map(|v| v["name"].as_str().unwrap()).collect();
         assert!(names.contains(&"PDF"));
         assert!(names.contains(&"HTML"));

@@ -1,0 +1,13 @@
+[package]
+name = "fastrag-epub"
+description = "EPUB parser for FastRAG"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+fastrag-core.workspace = true
+fastrag-html = { workspace = true }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+quick-xml = "0.37"

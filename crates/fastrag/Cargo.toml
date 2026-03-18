@@ -19,12 +19,13 @@ fastrag-xml = { workspace = true, optional = true }
 fastrag-xlsx = { workspace = true, optional = true }
 fastrag-docx = { workspace = true, optional = true }
 fastrag-pptx = { workspace = true, optional = true }
+fastrag-epub = { workspace = true, optional = true }
 
 [dev-dependencies]
 serde_json = "1"
 
 [features]
-default = ["pdf", "html", "markdown", "csv", "text", "xml", "xlsx", "docx", "pptx", "language-detection"]
+default = ["pdf", "html", "markdown", "csv", "text", "xml", "xlsx", "docx", "pptx", "epub", "language-detection"]
 pdf = ["dep:fastrag-pdf"]
 pdf-parallel = ["pdf", "fastrag-pdf/parallel"]
 pdf-images = ["pdf", "fastrag-pdf/images"]
@@ -38,4 +39,5 @@ xml = ["dep:fastrag-xml"]
 xlsx = ["dep:fastrag-xlsx"]
 docx = ["dep:fastrag-docx"]
 pptx = ["dep:fastrag-pptx"]
+epub = ["dep:fastrag-epub"]
 language-detection = ["fastrag-core/language-detection"]
