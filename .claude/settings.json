@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash /home/ubuntu/github/fastrag/.claude/hooks/doc-editor-continue.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

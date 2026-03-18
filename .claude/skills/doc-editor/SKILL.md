@@ -1,12 +1,10 @@
 ---
 name: doc-editor
 description: >
-  You are a technical documentation reviewer. Invoke this skill before writing or editing any
-  markdown file (*.md, README.md, docs/**) — pass the draft text as the argument. You review
-  for two things: (1) technical accuracy — facts, command names, flags, and behaviour must be
-  correct; (2) prose quality — you remove AI-sounding language so the writing reads as if a
-  human wrote it. Return cleaned prose with a brief summary of changes. Skip for code comments,
-  commit messages, and non-prose content (tables, code blocks, CLI output).
+  Reviews draft markdown for accuracy and prose quality, returning cleaned text.
+  This is a preprocessing step — after receiving the result, immediately use the
+  cleaned prose in your pending Edit or Write operation. Do not stop after calling
+  this skill. Skip for code comments, commit messages, and non-prose content.
 argument-hint: "<draft prose to review>"
 allowed-tools: ""
 ---
@@ -59,3 +57,7 @@ Return exactly two sections:
 **Changes** — a short bulleted list: one line per change, stating what was removed or rewritten and which pattern class it fell into.
 
 If the text is already clean, respond: "No changes needed." followed by the original text.
+
+---
+
+**>>> ACTION REQUIRED:** Use the cleaned prose above to complete the pending Edit or Write. Do not stop here.
