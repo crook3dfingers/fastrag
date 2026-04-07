@@ -9,6 +9,7 @@ use fastrag::ops::{self, collect_files, output_path, render_document};
 use fastrag::registry::ParserRegistry;
 use fastrag::{ChunkingStrategy, OutputFormat};
 use fastrag_cli::args::{self, ChunkStrategyArg, Cli, Command, OutputFormatArg};
+use fastrag_cli::embed_loader;
 use indicatif::{ProgressBar, ProgressStyle};
 use tokio::sync::Semaphore;
 
@@ -148,7 +149,7 @@ async fn main() {
                 similarity_threshold,
                 percentile_threshold,
             );
-            let opts = fastrag_cli::embed_loader::EmbedderOptions {
+            let opts = embed_loader::EmbedderOptions {
                 kind: embedder,
                 model_path,
                 openai_model,
@@ -156,7 +157,7 @@ async fn main() {
                 ollama_model,
                 ollama_url,
             };
-            let embedder = fastrag_cli::embed_loader::load_for_write(&opts).unwrap_or_else(|e| {
+            let embedder = embed_loader::load_for_write(&opts).unwrap_or_else(|e| {
                 eprintln!("Error loading embedder: {e}");
                 std::process::exit(1);
             });
@@ -202,7 +203,7 @@ async fn main() {
             ollama_url,
             filter,
         } => {
-            let opts = fastrag_cli::embed_loader::EmbedderOptions {
+            let opts = embed_loader::EmbedderOptions {
                 kind: embedder,
                 model_path,
                 openai_model,
@@ -210,11 +211,10 @@ async fn main() {
                 ollama_model,
                 ollama_url,
             };
-            let embedder =
-                fastrag_cli::embed_loader::load_for_read(&corpus, &opts).unwrap_or_else(|e| {
-                    eprintln!("Error loading embedder: {e}");
-                    std::process::exit(1);
-                });
+            let embedder = embed_loader::load_for_read(&corpus, &opts).unwrap_or_else(|e| {
+                eprintln!("Error loading embedder: {e}");
+                std::process::exit(1);
+            });
             let filter_map = match filter.as_deref() {
                 Some(s) => match args::parse_filter(s) {
                     Ok(m) => m,
@@ -293,7 +293,7 @@ async fn main() {
             token,
         } => {
             let token = token.or_else(|| std::env::var("FASTRAG_TOKEN").ok());
-            let opts = fastrag_cli::embed_loader::EmbedderOptions {
+            let opts = embed_loader::EmbedderOptions {
                 kind: embedder,
                 model_path,
                 openai_model,
@@ -301,7 +301,11 @@ async fn main() {
                 ollama_model,
                 ollama_url,
             };
-            if let Err(e) = fastrag_cli::http::serve_http(corpus, port, &opts, token).await {
+            let embedder = embed_loader::load_for_read(&corpus, &opts).unwrap_or_else(|e| {
+                eprintln!("Error loading embedder: {e}");
+                std::process::exit(1);
+            });
+            if let Err(e) = fastrag_cli::http::serve_http(corpus, port, embedder, token).await {
                 eprintln!("Error starting HTTP server: {e}");
                 std::process::exit(1);
             }
