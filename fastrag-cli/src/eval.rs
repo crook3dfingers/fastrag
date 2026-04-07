@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use fastrag_eval::{EvalDataset, Runner, load_by_name};
 
-use crate::args::{EvalChunkingArg, EvalDatasetNameArg, EvalEmbedderArg};
+use fastrag_cli::args::{EvalChunkingArg, EvalDatasetNameArg, EvalEmbedderArg};
 use fastrag_embed::Embedder;
 
 #[allow(clippy::too_many_arguments)]

@@ -106,10 +106,9 @@ pub enum HttpError {
 pub async fn serve_http(
     corpus_dir: PathBuf,
     port: u16,
-    model_path: Option<PathBuf>,
+    embedder: Arc<dyn Embedder>,
     token: Option<String>,
 ) -> Result<(), HttpError> {
-    let embedder = crate::embed_loader::load_embedder(model_path)?;
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
     serve_http_with_embedder(corpus_dir, listener, embedder, token).await
 }

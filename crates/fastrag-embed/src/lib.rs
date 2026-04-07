@@ -1,6 +1,9 @@
 mod bge;
 mod error;
 
+#[cfg(feature = "http-embedders")]
+pub mod http;
+
 #[cfg(feature = "test-utils")]
 pub mod test_utils;
 
@@ -12,8 +15,11 @@ pub trait Embedder: Send + Sync {
     /// An identifier for the embedding model implementation used.
     ///
     /// This is written into corpus manifests to enforce compatibility at load time.
-    fn model_id(&self) -> &'static str {
-        "unknown"
+    ///
+    /// Returns an owned String so HTTP-backed embedders can encode runtime-chosen model
+    /// names (e.g. "openai:text-embedding-3-small").
+    fn model_id(&self) -> String {
+        "unknown".to_string()
     }
 
     fn dim(&self) -> usize;

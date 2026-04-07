@@ -243,6 +243,30 @@ The MCP server exposes the same search capability as `search_corpus` when built 
 
 Quality, latency, and footprint baselines for the retrieval pipeline are tracked in [`docs/eval-baselines.md`](docs/eval-baselines.md). Regenerate them with `scripts/run-eval.sh`.
 
+### Embedder backends
+
+FastRAG ships three embedder backends, selectable via `--embedder`:
+
+| Backend | Flag | Model flag | Base URL flag | Auth |
+|---|---|---|---|---|
+| Local BGE (default) | `--embedder bge` | `--model-path <dir>` (optional) | — | — |
+| OpenAI | `--embedder openai` | `--openai-model <name>` | `--openai-base-url <url>` | `OPENAI_API_KEY` env |
+| Ollama | `--embedder ollama` | `--ollama-model <name>` | `--ollama-url <url>` (or `OLLAMA_HOST`) | — |
+
+OpenAI supports `text-embedding-3-small` (1536-d) and `text-embedding-3-large` (3072-d). Ollama probes the model's dimension on startup, so any pulled embedding model works.
+
+Once a corpus is indexed, `query` and `serve-http` read the backend from the manifest's `embedding_model_id`. Omit `--embedder` on read paths to use the recorded backend; passing an explicit `--embedder` that disagrees with the manifest is a hard error.
+
+#### Testing against real APIs
+
+Real-API smoke tests are `#[ignore]`-gated. To run them:
+
+```bash
+FASTRAG_E2E_OPENAI=1 OPENAI_API_KEY=sk-... cargo test -p fastrag-embed --features http-embedders -- --ignored
+```
+
+CI never runs them.
+
 ### Library
 
 ```rust

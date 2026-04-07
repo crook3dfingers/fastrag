@@ -1,15 +1,15 @@
-mod args;
 #[cfg(feature = "eval")]
 mod eval;
 
 use std::path::Path;
 use std::sync::Arc;
 
-use args::{ChunkStrategyArg, Cli, Command, OutputFormatArg};
 use clap::Parser;
 use fastrag::ops::{self, collect_files, output_path, render_document};
 use fastrag::registry::ParserRegistry;
 use fastrag::{ChunkingStrategy, OutputFormat};
+use fastrag_cli::args::{self, ChunkStrategyArg, Cli, Command, OutputFormatArg};
+use fastrag_cli::embed_loader;
 use indicatif::{ProgressBar, ProgressStyle};
 use tokio::sync::Semaphore;
 
@@ -134,48 +134,62 @@ async fn main() {
             similarity_threshold,
             percentile_threshold,
             model_path,
+            embedder,
+            openai_model,
+            openai_base_url,
+            ollama_model,
+            ollama_url,
             metadata,
         } => {
-            let chunking = chunking_from_args(
-                chunk_strategy,
-                chunk_size,
-                chunk_overlap,
-                chunk_separators,
-                similarity_threshold,
-                percentile_threshold,
-            );
-            let embedder =
-                fastrag_cli::embed_loader::load_embedder(model_path).unwrap_or_else(|e| {
+            tokio::task::block_in_place(|| {
+                let chunking = chunking_from_args(
+                    chunk_strategy,
+                    chunk_size,
+                    chunk_overlap,
+                    chunk_separators,
+                    similarity_threshold,
+                    percentile_threshold,
+                );
+                let opts = embed_loader::EmbedderOptions {
+                    kind: embedder,
+                    model_path,
+                    openai_model,
+                    openai_base_url,
+                    ollama_model,
+                    ollama_url,
+                };
+                let embedder = embed_loader::load_for_write(&opts).unwrap_or_else(|e| {
                     eprintln!("Error loading embedder: {e}");
                     std::process::exit(1);
                 });
-            let base_metadata: std::collections::BTreeMap<String, String> =
-                metadata.into_iter().collect();
-            match ops::index_path_with_metadata(
-                &input,
-                &corpus,
-                &chunking,
-                embedder.as_ref(),
-                &base_metadata,
-            ) {
-                Ok(stats) => {
-                    println!("{}", serde_json::to_string_pretty(&stats).unwrap());
-                    println!(
-                        "indexed {} files ({} new, {} changed, {} unchanged, {} deleted) — {} chunks added, {} removed",
-                        stats.files_indexed,
-                        stats.files_new,
-                        stats.files_changed,
-                        stats.files_unchanged,
-                        stats.files_deleted,
-                        stats.chunks_added,
-                        stats.chunks_removed,
-                    );
+                let base_metadata: std::collections::BTreeMap<String, String> =
+                    metadata.into_iter().collect();
+                match ops::index_path_with_metadata(
+                    &input,
+                    &corpus,
+                    &chunking,
+                    embedder.as_ref(),
+                    &base_metadata,
+                ) {
+                    Ok(stats) => {
+                        println!("{}", serde_json::to_string_pretty(&stats).unwrap());
+                        println!(
+                            "indexed {} files ({} new, {} changed, {} unchanged, {} deleted) — {} chunks added, {} removed",
+                            stats.files_indexed,
+                            stats.files_new,
+                            stats.files_changed,
+                            stats.files_unchanged,
+                            stats.files_deleted,
+                            stats.chunks_added,
+                            stats.chunks_removed,
+                        );
+                    }
+                    Err(e) => {
+                        eprintln!("Error indexing {}: {e}", input.display());
+                        std::process::exit(1);
+                    }
                 }
-                Err(e) => {
-                    eprintln!("Error indexing {}: {e}", input.display());
-                    std::process::exit(1);
-                }
-            }
+            });
         }
         #[cfg(feature = "retrieval")]
         Command::Query {
@@ -184,36 +198,50 @@ async fn main() {
             top_k,
             format,
             model_path,
+            embedder,
+            openai_model,
+            openai_base_url,
+            ollama_model,
+            ollama_url,
             filter,
         } => {
-            let embedder =
-                fastrag_cli::embed_loader::load_embedder(model_path).unwrap_or_else(|e| {
+            tokio::task::block_in_place(|| {
+                let opts = embed_loader::EmbedderOptions {
+                    kind: embedder,
+                    model_path,
+                    openai_model,
+                    openai_base_url,
+                    ollama_model,
+                    ollama_url,
+                };
+                let embedder = embed_loader::load_for_read(&corpus, &opts).unwrap_or_else(|e| {
                     eprintln!("Error loading embedder: {e}");
                     std::process::exit(1);
                 });
-            let filter_map = match filter.as_deref() {
-                Some(s) => match args::parse_filter(s) {
-                    Ok(m) => m,
+                let filter_map = match filter.as_deref() {
+                    Some(s) => match args::parse_filter(s) {
+                        Ok(m) => m,
+                        Err(e) => {
+                            eprintln!("Error parsing --filter: {e}");
+                            std::process::exit(2);
+                        }
+                    },
+                    None => std::collections::BTreeMap::new(),
+                };
+                match ops::query_corpus_with_filter(
+                    &corpus,
+                    &query,
+                    top_k,
+                    embedder.as_ref(),
+                    &filter_map,
+                ) {
+                    Ok(hits) => print_query_results(&hits, format),
                     Err(e) => {
-                        eprintln!("Error parsing --filter: {e}");
-                        std::process::exit(2);
+                        eprintln!("Error querying corpus {}: {e}", corpus.display());
+                        std::process::exit(1);
                     }
-                },
-                None => std::collections::BTreeMap::new(),
-            };
-            match ops::query_corpus_with_filter(
-                &corpus,
-                &query,
-                top_k,
-                embedder.as_ref(),
-                &filter_map,
-            ) {
-                Ok(hits) => print_query_results(&hits, format),
-                Err(e) => {
-                    eprintln!("Error querying corpus {}: {e}", corpus.display());
-                    std::process::exit(1);
                 }
-            }
+            });
         }
         #[cfg(feature = "retrieval")]
         Command::CorpusInfo { corpus } => match ops::corpus_info(&corpus) {
@@ -261,10 +289,27 @@ async fn main() {
             corpus,
             port,
             model_path,
+            embedder,
+            openai_model,
+            openai_base_url,
+            ollama_model,
+            ollama_url,
             token,
         } => {
             let token = token.or_else(|| std::env::var("FASTRAG_TOKEN").ok());
-            if let Err(e) = fastrag_cli::http::serve_http(corpus, port, model_path, token).await {
+            let opts = embed_loader::EmbedderOptions {
+                kind: embedder,
+                model_path,
+                openai_model,
+                openai_base_url,
+                ollama_model,
+                ollama_url,
+            };
+            let embedder = embed_loader::load_for_read(&corpus, &opts).unwrap_or_else(|e| {
+                eprintln!("Error loading embedder: {e}");
+                std::process::exit(1);
+            });
+            if let Err(e) = fastrag_cli::http::serve_http(corpus, port, embedder, token).await {
                 eprintln!("Error starting HTTP server: {e}");
                 std::process::exit(1);
             }

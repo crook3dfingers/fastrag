@@ -23,6 +23,14 @@ pub fn parse_filter(s: &str) -> Result<std::collections::BTreeMap<String, String
     Ok(out)
 }
 
+#[cfg(feature = "retrieval")]
+#[derive(Clone, Copy, ValueEnum, PartialEq, Eq)]
+pub enum EmbedderKindArg {
+    Bge,
+    Openai,
+    Ollama,
+}
+
 #[derive(Parser)]
 #[command(name = "fastrag", about = "Fast document parser for AI/RAG pipelines")]
 #[command(version)]
@@ -132,6 +140,27 @@ pub enum Command {
         #[arg(long)]
         model_path: Option<PathBuf>,
 
+        /// Embedder backend to use. Defaults to bge for write paths; auto-detected
+        /// from the corpus manifest on read paths if omitted.
+        #[arg(long, value_enum)]
+        embedder: Option<EmbedderKindArg>,
+
+        /// OpenAI model name.
+        #[arg(long, default_value = "text-embedding-3-small")]
+        openai_model: String,
+
+        /// OpenAI API base URL.
+        #[arg(long, default_value = "https://api.openai.com/v1")]
+        openai_base_url: String,
+
+        /// Ollama model name.
+        #[arg(long, default_value = "nomic-embed-text")]
+        ollama_model: String,
+
+        /// Ollama server URL.
+        #[arg(long, default_value = "http://localhost:11434")]
+        ollama_url: String,
+
         /// Apply metadata key=value to every file in this run (repeatable).
         /// Per-file `.meta.json` sidecars override these on conflict.
         #[arg(long = "metadata", value_parser = parse_kv)]
@@ -159,6 +188,27 @@ pub enum Command {
         /// Optional local model path
         #[arg(long)]
         model_path: Option<PathBuf>,
+
+        /// Embedder backend to use. Defaults to bge for write paths; auto-detected
+        /// from the corpus manifest on read paths if omitted.
+        #[arg(long, value_enum)]
+        embedder: Option<EmbedderKindArg>,
+
+        /// OpenAI model name.
+        #[arg(long, default_value = "text-embedding-3-small")]
+        openai_model: String,
+
+        /// OpenAI API base URL.
+        #[arg(long, default_value = "https://api.openai.com/v1")]
+        openai_base_url: String,
+
+        /// Ollama model name.
+        #[arg(long, default_value = "nomic-embed-text")]
+        ollama_model: String,
+
+        /// Ollama server URL.
+        #[arg(long, default_value = "http://localhost:11434")]
+        ollama_url: String,
 
         /// Comma-separated equality filters (e.g. `customer=acme,severity=high`).
         /// AND-combined; applied as a post-filter over the HNSW fan-out.
@@ -240,6 +290,27 @@ pub enum Command {
         /// Optional local model path
         #[arg(long)]
         model_path: Option<PathBuf>,
+
+        /// Embedder backend to use. Defaults to bge for write paths; auto-detected
+        /// from the corpus manifest on read paths if omitted.
+        #[arg(long, value_enum)]
+        embedder: Option<EmbedderKindArg>,
+
+        /// OpenAI model name.
+        #[arg(long, default_value = "text-embedding-3-small")]
+        openai_model: String,
+
+        /// OpenAI API base URL.
+        #[arg(long, default_value = "https://api.openai.com/v1")]
+        openai_base_url: String,
+
+        /// Ollama model name.
+        #[arg(long, default_value = "nomic-embed-text")]
+        ollama_model: String,
+
+        /// Ollama server URL.
+        #[arg(long, default_value = "http://localhost:11434")]
+        ollama_url: String,
 
         /// Shared-secret auth token. Also read from FASTRAG_TOKEN env var; CLI flag wins.
         /// When set, /query and /metrics require `X-Fastrag-Token: <token>` or

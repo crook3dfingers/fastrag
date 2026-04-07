@@ -32,12 +32,20 @@ subtle = "2"
 default = ["language-detection", "mcp", "retrieval"]
 language-detection = ["fastrag/language-detection"]
 mcp = ["dep:fastrag-mcp"]
-retrieval = ["fastrag/retrieval", "dep:fastrag-embed", "dep:axum"]
+retrieval = [
+    "fastrag/retrieval",
+    "dep:fastrag-embed",
+    "fastrag-embed/http-embedders",
+    "dep:axum",
+]
 eval = ["dep:fastrag-eval", "dep:fastrag-embed", "fastrag-embed/test-utils"]
 
 [dev-dependencies]
+assert_cmd = "2"
 serde_json = "1"
-reqwest.workspace = true
+tokio = { version = "1", features = ["rt", "macros"] }
 tempfile = "3"
+reqwest.workspace = true
+wiremock = "0.6"
 fastrag-embed = { workspace = true, features = ["test-utils"] }
 prometheus-parse = "0.2"
