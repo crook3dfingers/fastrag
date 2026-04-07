@@ -88,6 +88,35 @@ pub fn resolve_root(manifest: &mut CorpusManifest, abs: &Path) -> u32 {
     id
 }
 
+/// Walk `root` via the existing `collect_files` path and produce `WalkedFile`s
+/// suitable for `plan_index`. Canonicalizes `root` once.
+pub fn walk_for_plan(root: &Path) -> std::io::Result<(PathBuf, Vec<WalkedFile>)> {
+    let root_abs = root.canonicalize()?;
+    let files = if root_abs.is_file() {
+        vec![root_abs.clone()]
+    } else {
+        crate::ops::collect_files(&root_abs)
+    };
+    let mut out = Vec::with_capacity(files.len());
+    for path in files {
+        let rel = path.strip_prefix(&root_abs).unwrap_or(&path).to_path_buf();
+        let md = std::fs::metadata(&path)?;
+        let mtime_ns = md
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_nanos() as i128)
+            .unwrap_or(0);
+        out.push(WalkedFile {
+            rel_path: rel,
+            abs_path: path,
+            size: md.len(),
+            mtime_ns,
+        });
+    }
+    Ok((root_abs, out))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -267,5 +296,26 @@ mod tests {
         assert_eq!(plan.new.len(), 1);
         assert!(plan.deleted.is_empty());
         assert_eq!(m.roots.len(), 2);
+    }
+
+    #[test]
+    fn walk_for_plan_produces_relative_paths_and_stat() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), b"hello").unwrap();
+        std::fs::write(dir.path().join("b.txt"), b"world!!").unwrap();
+        let (root, files) = walk_for_plan(dir.path()).unwrap();
+        assert_eq!(root, dir.path().canonicalize().unwrap());
+        let names: Vec<_> = files
+            .iter()
+            .map(|f| f.rel_path.to_string_lossy().into_owned())
+            .collect();
+        assert!(names.contains(&"a.txt".to_string()));
+        assert!(names.contains(&"b.txt".to_string()));
+        let a = files
+            .iter()
+            .find(|f| f.rel_path == std::path::Path::new("a.txt"))
+            .unwrap();
+        assert_eq!(a.size, 5);
+        assert!(a.mtime_ns > 0);
     }
 }
