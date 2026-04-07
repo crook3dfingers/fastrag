@@ -32,7 +32,12 @@ subtle = "2"
 default = ["language-detection", "mcp", "retrieval"]
 language-detection = ["fastrag/language-detection"]
 mcp = ["dep:fastrag-mcp"]
-retrieval = ["fastrag/retrieval", "dep:fastrag-embed", "dep:axum"]
+retrieval = [
+    "fastrag/retrieval",
+    "dep:fastrag-embed",
+    "fastrag-embed/http-embedders",
+    "dep:axum",
+]
 eval = ["dep:fastrag-eval", "dep:fastrag-embed", "fastrag-embed/test-utils"]
 
 [dev-dependencies]

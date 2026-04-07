@@ -134,6 +134,11 @@ async fn main() {
             similarity_threshold,
             percentile_threshold,
             model_path,
+            embedder: _,
+            openai_model: _,
+            openai_base_url: _,
+            ollama_model: _,
+            ollama_url: _,
             metadata,
         } => {
             let chunking = chunking_from_args(
@@ -184,6 +189,11 @@ async fn main() {
             top_k,
             format,
             model_path,
+            embedder: _,
+            openai_model: _,
+            openai_base_url: _,
+            ollama_model: _,
+            ollama_url: _,
             filter,
         } => {
             let embedder =
@@ -261,6 +271,11 @@ async fn main() {
             corpus,
             port,
             model_path,
+            embedder: _,
+            openai_model: _,
+            openai_base_url: _,
+            ollama_model: _,
+            ollama_url: _,
             token,
         } => {
             let token = token.or_else(|| std::env::var("FASTRAG_TOKEN").ok());
