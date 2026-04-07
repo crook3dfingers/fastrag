@@ -203,8 +203,16 @@ FastRAG can build and query a persisted semantic corpus when the `retrieval` fea
 # Index a file or directory into a corpus directory
 fastrag index ./documents --corpus ./corpus
 
+# Index with run-wide metadata (applied to every file)
+fastrag index ./documents --corpus ./corpus \
+    --metadata customer=acme --metadata year=2024
+
 # Query the indexed corpus
 fastrag query "invoice payment terms" --corpus ./corpus --top-k 5
+
+# Filter by metadata at query time (AND-combined equality)
+fastrag query "privilege escalation" --corpus ./corpus \
+    --filter customer=acme,severity=high
 
 # Show corpus metadata
 fastrag corpus-info --corpus ./corpus
@@ -212,6 +220,12 @@ fastrag corpus-info --corpus ./corpus
 # Start the HTTP query server
 fastrag serve-http --corpus ./corpus --port 8081
 ```
+
+Alongside each input file, an optional `<name>.meta.json` sidecar carrying a flat
+`{"key":"string"}` object attaches per-file metadata. Sidecar values override any
+`--metadata` flags on the same key. Query-time filters pass as `--filter k=v,k=v`
+on the CLI, `&filter=k=v,k=v` on the HTTP `/query` endpoint, or as a `filter`
+object on the MCP `search_corpus` tool.
 
 The CLI accepts an optional local model path with `--model-path`. If omitted, FastRAG loads the default BGE-small-en-v1.5 embedder and caches it under `dirs::cache_dir()/fastrag/models/bge-small-en-v1.5`.
 

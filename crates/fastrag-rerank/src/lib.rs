@@ -83,6 +83,7 @@ mod tests {
                 element_kinds: vec![ElementKind::Paragraph],
                 pages: vec![],
                 language: None,
+                metadata: std::collections::BTreeMap::new(),
             },
             score,
         }

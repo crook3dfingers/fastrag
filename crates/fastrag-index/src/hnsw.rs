@@ -255,6 +255,7 @@ mod tests {
             element_kinds: vec![ElementKind::Paragraph],
             pages: vec![1],
             language: Some("en".to_string()),
+            metadata: std::collections::BTreeMap::new(),
         }
     }
 

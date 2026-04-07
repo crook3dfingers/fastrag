@@ -258,6 +258,7 @@ fn index_documents_with_memory(
             element_kinds: Vec::new(),
             pages: Vec::new(),
             language: None,
+            metadata: std::collections::BTreeMap::new(),
         });
         next_id += 1;
         *memory_peak = (*memory_peak).max(sample_current_rss_bytes());

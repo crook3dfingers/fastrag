@@ -103,6 +103,9 @@ pub struct SearchCorpusParams {
     /// Number of hits to return
     #[schemars(description = "Number of hits to return")]
     pub top_k: Option<usize>,
+    /// Equality filters applied to entry metadata (AND-combined)
+    #[schemars(description = "Equality filters applied to entry metadata (AND-combined)")]
+    pub filter: Option<std::collections::BTreeMap<String, String>>,
 }
 
 pub struct FastRagMcpServer {
@@ -280,9 +283,16 @@ impl FastRagMcpServer {
             let corpus_path = params.corpus_path.clone();
             let query = params.query.clone();
             let top_k = params.top_k.unwrap_or(5);
+            let filter = params.filter.clone().unwrap_or_default();
 
             let hits = tokio::task::spawn_blocking(move || {
-                ops::query_corpus(&corpus_path, &query, top_k, embedder.as_ref())
+                ops::query_corpus_with_filter(
+                    &corpus_path,
+                    &query,
+                    top_k,
+                    embedder.as_ref(),
+                    &filter,
+                )
             })
             .await
             .map_err(|e| format!("Task failed: {e}"))?

@@ -35,6 +35,8 @@ pub enum CorpusError {
     EmbeddingOutputMismatch { expected: usize, got: usize },
     #[error("embedder returned no vectors")]
     EmptyEmbeddingOutput,
+    #[error("invalid metadata sidecar: {0}")]
+    BadMetadataSidecar(String),
     #[cfg(feature = "rerank")]
     #[error("reranker error: {0}")]
     Rerank(String),
@@ -93,6 +95,30 @@ pub fn index_path(
     chunking: &ChunkingStrategy,
     embedder: &dyn Embedder,
 ) -> Result<CorpusIndexStats, CorpusError> {
+    index_path_with_metadata(
+        input,
+        corpus_dir,
+        chunking,
+        embedder,
+        &std::collections::BTreeMap::new(),
+    )
+}
+
+/// Like [`index_path`] but merges user-supplied metadata into every entry.
+///
+/// For each input file, metadata is resolved as:
+/// 1. `base_metadata` (applied to all files in the run, typically from `--metadata k=v`)
+/// 2. Per-file sidecar at `<path>.meta.json` (must be a flat `{ "key": "string" }` object;
+///    unknown fields are rejected)
+///
+/// Sidecar values override base values on the same key.
+pub fn index_path_with_metadata(
+    input: &Path,
+    corpus_dir: &Path,
+    chunking: &ChunkingStrategy,
+    embedder: &dyn Embedder,
+    base_metadata: &std::collections::BTreeMap<String, String>,
+) -> Result<CorpusIndexStats, CorpusError> {
     let mut files = if input.is_file() {
         vec![input.to_path_buf()]
     } else {
@@ -119,6 +145,14 @@ pub fn index_path(
         let doc = load_document(path)?;
         let chunks = chunk_document(&doc, chunking);
         total_chunks += chunks.len();
+
+        // Merge base metadata + per-file sidecar (sidecar wins on conflict).
+        let mut file_metadata = base_metadata.clone();
+        let sidecar_path = sidecar_path_for(path);
+        if sidecar_path.exists() {
+            let sidecar = load_metadata_sidecar(&sidecar_path)?;
+            file_metadata.extend(sidecar);
+        }
 
         let texts: Vec<&str> = chunks.iter().map(|chunk| chunk.text.as_str()).collect();
         let vectors = embedder.embed(&texts)?;
@@ -148,6 +182,7 @@ pub fn index_path(
                     .into_iter()
                     .collect(),
                 language: chunk_language(&doc, &chunk),
+                metadata: file_metadata.clone(),
             })
             .collect::<Vec<_>>();
 
@@ -173,11 +208,87 @@ pub fn query_corpus(
     top_k: usize,
     embedder: &dyn Embedder,
 ) -> Result<Vec<SearchHit>, CorpusError> {
+    query_corpus_with_filter(
+        corpus_dir,
+        query,
+        top_k,
+        embedder,
+        &std::collections::BTreeMap::new(),
+    )
+}
+
+/// Two-stage filtered retrieval: HNSW returns `top_k * over_fetch` candidates,
+/// an equality filter is applied, and the top-k survivors are returned.
+///
+/// The over-fetch factor starts at 4×; if the filter eliminates every hit, the
+/// search is retried once with 16× over-fetch before giving up and returning
+/// an empty vec. An empty filter short-circuits the retry loop.
+pub fn query_corpus_with_filter(
+    corpus_dir: &Path,
+    query: &str,
+    top_k: usize,
+    embedder: &dyn Embedder,
+    filter: &std::collections::BTreeMap<String, String>,
+) -> Result<Vec<SearchHit>, CorpusError> {
     let index = HnswIndex::load(corpus_dir)?;
     let mut vectors = embedder.embed(&[query])?;
     let vector = vectors.pop().ok_or(CorpusError::EmptyEmbeddingOutput)?;
-    let hits = index.query(&vector, top_k)?;
-    Ok(hits)
+
+    if filter.is_empty() {
+        return Ok(index.query(&vector, top_k)?);
+    }
+
+    for factor in [4usize, 16] {
+        let fan_out = top_k.saturating_mul(factor).max(top_k);
+        let hits = index.query(&vector, fan_out)?;
+        let filtered: Vec<SearchHit> = hits
+            .into_iter()
+            .filter(|h| h.entry.matches_filter(filter))
+            .take(top_k)
+            .collect();
+        if !filtered.is_empty() {
+            return Ok(filtered);
+        }
+    }
+    Ok(Vec::new())
+}
+
+fn sidecar_path_for(path: &Path) -> PathBuf {
+    let mut p = path.to_path_buf();
+    let new_name = match path.file_name().and_then(|n| n.to_str()) {
+        Some(name) => {
+            let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(name);
+            format!("{stem}.meta.json")
+        }
+        None => "meta.json".to_string(),
+    };
+    p.set_file_name(new_name);
+    p
+}
+
+fn load_metadata_sidecar(
+    path: &Path,
+) -> Result<std::collections::BTreeMap<String, String>, CorpusError> {
+    let raw = std::fs::read_to_string(path)?;
+    let parsed: serde_json::Value = serde_json::from_str(&raw)?;
+    let obj = parsed.as_object().ok_or_else(|| {
+        CorpusError::BadMetadataSidecar(format!(
+            "{}: top-level value must be a JSON object",
+            path.display()
+        ))
+    })?;
+    let mut out = std::collections::BTreeMap::new();
+    for (k, v) in obj {
+        let s = v.as_str().ok_or_else(|| {
+            CorpusError::BadMetadataSidecar(format!(
+                "{}: metadata value for '{k}' must be a string, got {}",
+                path.display(),
+                v
+            ))
+        })?;
+        out.insert(k.clone(), s.to_string());
+    }
+    Ok(out)
 }
 
 /// Two-stage retrieval: fetch `top_k * over_fetch` hits from HNSW, rerank with
@@ -349,5 +460,91 @@ mod tests {
         let info = corpus_info(corpus.path()).unwrap();
         assert_eq!(info.entry_count, 2);
         assert_eq!(info.source_files.len(), 2);
+    }
+
+    #[test]
+    fn sidecar_overrides_base_metadata_and_filters_queries() {
+        let input = tempdir().unwrap();
+        fs::write(
+            input.path().join("alpha.txt"),
+            "ALPHA\n\nalpha beta gamma delta.",
+        )
+        .unwrap();
+        fs::write(
+            input.path().join("beta.txt"),
+            "BETA\n\nbeta gamma delta epsilon.",
+        )
+        .unwrap();
+        fs::write(
+            input.path().join("alpha.meta.json"),
+            r#"{"customer":"acme","severity":"high"}"#,
+        )
+        .unwrap();
+
+        let corpus = tempdir().unwrap();
+        let mut base = std::collections::BTreeMap::new();
+        base.insert("customer".to_string(), "base".to_string());
+        index_path_with_metadata(
+            input.path(),
+            corpus.path(),
+            &ChunkingStrategy::Basic {
+                max_characters: 1000,
+                overlap: 0,
+            },
+            &MockEmbedder,
+            &base,
+        )
+        .unwrap();
+
+        let unfiltered = query_corpus(corpus.path(), "beta gamma delta", 5, &MockEmbedder).unwrap();
+        assert_eq!(unfiltered.len(), 2);
+
+        let mut f = std::collections::BTreeMap::new();
+        f.insert("customer".to_string(), "acme".to_string());
+        let hits =
+            query_corpus_with_filter(corpus.path(), "beta gamma delta", 5, &MockEmbedder, &f)
+                .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].entry.source_path.file_name().unwrap(), "alpha.txt");
+        assert_eq!(
+            hits[0].entry.metadata.get("severity").map(String::as_str),
+            Some("high")
+        );
+
+        let mut f = std::collections::BTreeMap::new();
+        f.insert("customer".to_string(), "base".to_string());
+        let hits =
+            query_corpus_with_filter(corpus.path(), "beta gamma delta", 5, &MockEmbedder, &f)
+                .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].entry.source_path.file_name().unwrap(), "beta.txt");
+
+        let mut f = std::collections::BTreeMap::new();
+        f.insert("customer".to_string(), "nobody".to_string());
+        let hits =
+            query_corpus_with_filter(corpus.path(), "beta gamma delta", 5, &MockEmbedder, &f)
+                .unwrap();
+        assert!(hits.is_empty());
+    }
+
+    #[test]
+    fn bad_sidecar_returns_clear_error() {
+        let input = tempdir().unwrap();
+        fs::write(input.path().join("alpha.txt"), "ALPHA\n\ntext.").unwrap();
+        fs::write(input.path().join("alpha.meta.json"), r#"{"customer":42}"#).unwrap();
+
+        let corpus = tempdir().unwrap();
+        let err = index_path_with_metadata(
+            input.path(),
+            corpus.path(),
+            &ChunkingStrategy::Basic {
+                max_characters: 1000,
+                overlap: 0,
+            },
+            &MockEmbedder,
+            &std::collections::BTreeMap::new(),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("must be a string"));
     }
 }

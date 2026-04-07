@@ -134,6 +134,7 @@ async fn main() {
             similarity_threshold,
             percentile_threshold,
             model_path,
+            metadata,
         } => {
             let chunking = chunking_from_args(
                 chunk_strategy,
@@ -148,7 +149,15 @@ async fn main() {
                     eprintln!("Error loading embedder: {e}");
                     std::process::exit(1);
                 });
-            match ops::index_path(&input, &corpus, &chunking, embedder.as_ref()) {
+            let base_metadata: std::collections::BTreeMap<String, String> =
+                metadata.into_iter().collect();
+            match ops::index_path_with_metadata(
+                &input,
+                &corpus,
+                &chunking,
+                embedder.as_ref(),
+                &base_metadata,
+            ) {
                 Ok(stats) => {
                     println!("{}", serde_json::to_string_pretty(&stats).unwrap());
                 }
@@ -165,13 +174,30 @@ async fn main() {
             top_k,
             format,
             model_path,
+            filter,
         } => {
             let embedder =
                 fastrag_cli::embed_loader::load_embedder(model_path).unwrap_or_else(|e| {
                     eprintln!("Error loading embedder: {e}");
                     std::process::exit(1);
                 });
-            match ops::query_corpus(&corpus, &query, top_k, embedder.as_ref()) {
+            let filter_map = match filter.as_deref() {
+                Some(s) => match args::parse_filter(s) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        eprintln!("Error parsing --filter: {e}");
+                        std::process::exit(2);
+                    }
+                },
+                None => std::collections::BTreeMap::new(),
+            };
+            match ops::query_corpus_with_filter(
+                &corpus,
+                &query,
+                top_k,
+                embedder.as_ref(),
+                &filter_map,
+            ) {
                 Ok(hits) => print_query_results(&hits, format),
                 Err(e) => {
                     eprintln!("Error querying corpus {}: {e}", corpus.display());

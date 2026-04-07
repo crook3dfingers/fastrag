@@ -2,6 +2,27 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand, ValueEnum};
 
+fn parse_kv(s: &str) -> Result<(String, String), String> {
+    s.split_once('=')
+        .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
+        .filter(|(k, _)| !k.is_empty())
+        .ok_or_else(|| format!("expected key=value, got `{s}`"))
+}
+
+/// Parse a `--filter` comma list like `customer=acme,severity=high` into a BTreeMap.
+pub fn parse_filter(s: &str) -> Result<std::collections::BTreeMap<String, String>, String> {
+    let mut out = std::collections::BTreeMap::new();
+    for pair in s.split(',') {
+        let pair = pair.trim();
+        if pair.is_empty() {
+            continue;
+        }
+        let (k, v) = parse_kv(pair)?;
+        out.insert(k, v);
+    }
+    Ok(out)
+}
+
 #[derive(Parser)]
 #[command(name = "fastrag", about = "Fast document parser for AI/RAG pipelines")]
 #[command(version)]
@@ -110,6 +131,11 @@ pub enum Command {
         /// Optional local model path
         #[arg(long)]
         model_path: Option<PathBuf>,
+
+        /// Apply metadata key=value to every file in this run (repeatable).
+        /// Per-file `.meta.json` sidecars override these on conflict.
+        #[arg(long = "metadata", value_parser = parse_kv)]
+        metadata: Vec<(String, String)>,
     },
 
     /// Query an indexed corpus
@@ -133,6 +159,11 @@ pub enum Command {
         /// Optional local model path
         #[arg(long)]
         model_path: Option<PathBuf>,
+
+        /// Comma-separated equality filters (e.g. `customer=acme,severity=high`).
+        /// AND-combined; applied as a post-filter over the HNSW fan-out.
+        #[arg(long)]
+        filter: Option<String>,
     },
 
     /// Show corpus metadata

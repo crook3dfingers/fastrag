@@ -27,6 +27,9 @@ struct QueryParams {
     q: String,
     #[serde(default = "default_top_k")]
     top_k: usize,
+    /// Comma-separated equality filters: `customer=acme,severity=high`.
+    #[serde(default)]
+    filter: Option<String>,
 }
 
 fn default_top_k() -> usize {
@@ -118,11 +121,21 @@ async fn query(
     let _enter = span.enter();
     let start = Instant::now();
 
-    let result = ops::query_corpus(
+    let filter_map = match params.filter.as_deref() {
+        Some(s) => match crate::args::parse_filter(s) {
+            Ok(m) => m,
+            Err(e) => {
+                return Err((StatusCode::BAD_REQUEST, format!("bad filter: {e}")).into_response());
+            }
+        },
+        None => std::collections::BTreeMap::new(),
+    };
+    let result = ops::query_corpus_with_filter(
         &state.corpus_dir,
         &params.q,
         params.top_k,
         state.embedder.as_ref(),
+        &filter_map,
     );
 
     let elapsed = start.elapsed();
