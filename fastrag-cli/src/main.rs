@@ -251,8 +251,10 @@ async fn main() {
             corpus,
             port,
             model_path,
+            token,
         } => {
-            if let Err(e) = fastrag_cli::http::serve_http(corpus, port, model_path).await {
+            let token = token.or_else(|| std::env::var("FASTRAG_TOKEN").ok());
+            if let Err(e) = fastrag_cli::http::serve_http(corpus, port, model_path, token).await {
                 eprintln!("Error starting HTTP server: {e}");
                 std::process::exit(1);
             }

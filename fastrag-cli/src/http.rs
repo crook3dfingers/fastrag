@@ -2,8 +2,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
-use axum::extract::{Query, State};
+use axum::extract::{Query, Request, State};
 use axum::http::StatusCode;
+use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
@@ -12,6 +13,7 @@ use fastrag::{Embedder, ops};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use serde::Deserialize;
 use serde_json::json;
+use subtle::ConstantTimeEq;
 use thiserror::Error;
 use tracing::{info, info_span, warn};
 
@@ -20,6 +22,57 @@ struct AppState {
     corpus_dir: PathBuf,
     embedder: Arc<dyn Embedder>,
     metrics: PrometheusHandle,
+}
+
+/// Shared-secret auth state. `None` = auth disabled (the server logs a warning
+/// at startup and accepts every request — matches pre-#26 behaviour for trusted
+/// localhost). `Some(token)` = every protected route must present a matching
+/// `X-Fastrag-Token` or `Authorization: Bearer` header.
+#[derive(Clone)]
+struct AuthState {
+    token: Option<Arc<String>>,
+}
+
+impl AuthState {
+    fn check(&self, provided: Option<&str>) -> bool {
+        let expected = match &self.token {
+            Some(t) => t,
+            None => return true,
+        };
+        let got = match provided {
+            Some(g) => g,
+            None => return false,
+        };
+        // ConstantTimeEq short-circuits on length mismatch via ct_eq on bytes —
+        // but we also must not leak via Option branching, so the Option check
+        // above runs unconditionally before we reach here.
+        expected.as_bytes().ct_eq(got.as_bytes()).into()
+    }
+}
+
+async fn auth_middleware(
+    State(state): State<AuthState>,
+    req: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    let headers = req.headers();
+    let provided = headers
+        .get("x-fastrag-token")
+        .and_then(|v| v.to_str().ok())
+        .or_else(|| {
+            headers
+                .get(axum::http::header::AUTHORIZATION)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| {
+                    s.strip_prefix("Bearer ")
+                        .or_else(|| s.strip_prefix("bearer "))
+                })
+        });
+    if state.check(provided) {
+        Ok(next.run(req).await)
+    } else {
+        Err(StatusCode::UNAUTHORIZED)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -54,20 +107,30 @@ pub async fn serve_http(
     corpus_dir: PathBuf,
     port: u16,
     model_path: Option<PathBuf>,
+    token: Option<String>,
 ) -> Result<(), HttpError> {
     let embedder = crate::embed_loader::load_embedder(model_path)?;
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
-    serve_http_with_embedder(corpus_dir, listener, embedder).await
+    serve_http_with_embedder(corpus_dir, listener, embedder, token).await
 }
 
 pub async fn serve_http_with_embedder(
     corpus_dir: PathBuf,
     listener: tokio::net::TcpListener,
     embedder: Arc<dyn Embedder>,
+    token: Option<String>,
 ) -> Result<(), HttpError> {
-    let metrics = PrometheusBuilder::new()
-        .install_recorder()
-        .map_err(|e| HttpError::Metrics(e.to_string()))?;
+    // The `metrics` crate allows exactly one global recorder per process, but in
+    // test binaries multiple serve_http_with_embedder calls share one process.
+    // Install exactly once, then reuse the handle for every subsequent server.
+    static METRICS_HANDLE: std::sync::OnceLock<PrometheusHandle> = std::sync::OnceLock::new();
+    let metrics = METRICS_HANDLE
+        .get_or_init(|| {
+            PrometheusBuilder::new()
+                .install_recorder()
+                .expect("install prometheus recorder")
+        })
+        .clone();
 
     metrics::describe_counter!("fastrag_query_total", "Total /query requests served");
     metrics::describe_histogram!(
@@ -83,15 +146,35 @@ pub async fn serve_http_with_embedder(
         metrics::gauge!("fastrag_index_entries").set(info.entry_count as f64);
     }
 
+    let auth_state = AuthState {
+        token: token.map(Arc::new),
+    };
+    if auth_state.token.is_none() {
+        warn!(
+            "serve-http started without --token / FASTRAG_TOKEN — all requests are accepted. \
+             Set a token before exposing on a shared network."
+        );
+    }
+
+    let app_state = AppState {
+        corpus_dir,
+        embedder,
+        metrics,
+    };
+
+    // /health stays unauthenticated for liveness probes.
+    let protected = Router::new()
+        .route("/query", get(query))
+        .route("/metrics", get(metrics_handler))
+        .route_layer(middleware::from_fn_with_state(
+            auth_state.clone(),
+            auth_middleware,
+        ));
+
     let app = Router::new()
         .route("/health", get(health))
-        .route("/metrics", get(metrics_handler))
-        .route("/query", get(query))
-        .with_state(AppState {
-            corpus_dir,
-            embedder,
-            metrics,
-        });
+        .merge(protected)
+        .with_state(app_state);
 
     axum::serve(listener, app)
         .await

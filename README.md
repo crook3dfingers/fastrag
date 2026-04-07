@@ -296,6 +296,15 @@ The `serve-http` subcommand exposes a small operational surface for production u
 | `fastrag_query_duration_seconds` | histogram | `/query` latency distribution |
 | `fastrag_index_entries` | gauge | Number of entries in the loaded corpus |
 
+### Authentication
+
+`serve-http` supports a shared-secret bearer token. Set it via `--token <value>` or the `FASTRAG_TOKEN` env var (CLI flag wins). When configured, `/query` and `/metrics` require one of:
+
+- `X-Fastrag-Token: <token>`
+- `Authorization: Bearer <token>`
+
+`/health` remains unauthenticated for liveness probes. Token comparison is constant-time via the `subtle` crate. If no token is set, the server logs a startup warning and accepts every request — intended only for trusted localhost use.
+
 ### Logging
 
 Logs go to stdout via `tracing`. Set `FASTRAG_LOG_FORMAT=json` for one-line JSON logs in production, or leave unset for the pretty terminal format. Filter levels with `FASTRAG_LOG=info,fastrag_cli=debug`.

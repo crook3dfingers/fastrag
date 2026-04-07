@@ -240,6 +240,12 @@ pub enum Command {
         /// Optional local model path
         #[arg(long)]
         model_path: Option<PathBuf>,
+
+        /// Shared-secret auth token. Also read from FASTRAG_TOKEN env var; CLI flag wins.
+        /// When set, /query and /metrics require `X-Fastrag-Token: <token>` or
+        /// `Authorization: Bearer <token>`. /health stays unauthenticated.
+        #[arg(long)]
+        token: Option<String>,
     },
 }
 

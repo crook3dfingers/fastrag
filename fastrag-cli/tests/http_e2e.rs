@@ -50,7 +50,7 @@ async fn http_query_and_health_end_to_end() {
         let corpus_dir = corpus.path().to_path_buf();
         let embedder = Arc::new(MockEmbedder);
         async move {
-            let _ = serve_http_with_embedder(corpus_dir, listener, embedder).await;
+            let _ = serve_http_with_embedder(corpus_dir, listener, embedder, None).await;
         }
     });
 
@@ -118,5 +118,116 @@ async fn http_query_and_health_end_to_end() {
         "expected at least one query recorded, got {total}"
     );
 
+    server.abort();
+}
+
+async fn spawn_server_with_token(
+    token: Option<String>,
+) -> (
+    std::net::SocketAddr,
+    tokio::task::JoinHandle<()>,
+    tempfile::TempDir,
+    tempfile::TempDir,
+) {
+    let input = sample_input_dir();
+    let corpus = temp_corpus_dir();
+    ops::index_path(
+        input.path(),
+        corpus.path(),
+        &ChunkingStrategy::Basic {
+            max_characters: 1000,
+            overlap: 0,
+        },
+        &MockEmbedder,
+    )
+    .unwrap();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn({
+        let corpus_dir = corpus.path().to_path_buf();
+        let embedder = Arc::new(MockEmbedder);
+        let token = token.clone();
+        async move {
+            let _ = serve_http_with_embedder(corpus_dir, listener, embedder, token).await;
+        }
+    });
+    (addr, server, input, corpus)
+}
+
+#[tokio::test]
+async fn auth_rejects_missing_token() {
+    let (addr, server, _input, _corpus) = spawn_server_with_token(Some("s3cret".into())).await;
+    let client = Client::new();
+    let resp = client
+        .get(format!("http://{addr}/query?q=alpha&top_k=1"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    // /health still open
+    let health = client
+        .get(format!("http://{addr}/health"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(health.status(), StatusCode::OK);
+    server.abort();
+}
+
+#[tokio::test]
+async fn auth_rejects_wrong_token() {
+    let (addr, server, _input, _corpus) = spawn_server_with_token(Some("s3cret".into())).await;
+    let client = Client::new();
+    let resp = client
+        .get(format!("http://{addr}/query?q=alpha&top_k=1"))
+        .header("X-Fastrag-Token", "wrong")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    // Length mismatch must also 401, not leak via early return.
+    let resp2 = client
+        .get(format!("http://{addr}/query?q=alpha&top_k=1"))
+        .header("X-Fastrag-Token", "a")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp2.status(), StatusCode::UNAUTHORIZED);
+    server.abort();
+}
+
+#[tokio::test]
+async fn auth_accepts_correct_token_header_and_bearer() {
+    let (addr, server, _input, _corpus) = spawn_server_with_token(Some("s3cret".into())).await;
+    let client = Client::new();
+    let ok1 = client
+        .get(format!("http://{addr}/query?q=alpha%20beta&top_k=1"))
+        .header("X-Fastrag-Token", "s3cret")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ok1.status(), StatusCode::OK);
+
+    let ok2 = client
+        .get(format!("http://{addr}/query?q=alpha%20beta&top_k=1"))
+        .header("Authorization", "Bearer s3cret")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ok2.status(), StatusCode::OK);
+    server.abort();
+}
+
+#[tokio::test]
+async fn no_token_configured_accepts_anonymous() {
+    let (addr, server, _input, _corpus) = spawn_server_with_token(None).await;
+    let client = Client::new();
+    let ok = client
+        .get(format!("http://{addr}/query?q=alpha&top_k=1"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ok.status(), StatusCode::OK);
     server.abort();
 }
