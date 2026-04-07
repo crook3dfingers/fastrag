@@ -202,13 +202,18 @@ pub fn index_path_with_metadata(
         let doc = load_document(&wf.abs_path)?;
         let chunks = chunk_document(&doc, chunking);
         let texts: Vec<&str> = chunks.iter().map(|c| c.text.as_str()).collect();
-        let vectors = embedder.embed(&texts)?;
-        if vectors.len() != chunks.len() {
-            return Err(CorpusError::EmbeddingOutputMismatch {
-                expected: chunks.len(),
-                got: vectors.len(),
-            });
-        }
+        let vectors: Vec<_> = if chunks.is_empty() {
+            Vec::new()
+        } else {
+            let vectors = embedder.embed(&texts)?;
+            if vectors.len() != chunks.len() {
+                return Err(CorpusError::EmbeddingOutputMismatch {
+                    expected: chunks.len(),
+                    got: vectors.len(),
+                });
+            }
+            vectors
+        };
 
         let mut file_metadata = base_metadata.clone();
         let sidecar = sidecar_path_for(&wf.abs_path);
@@ -245,7 +250,9 @@ pub fn index_path_with_metadata(
             })
             .collect();
         chunks_added += entries.len();
-        index.add(entries)?;
+        if !entries.is_empty() {
+            index.add(entries)?;
+        }
 
         let content_hash = Some(fastrag_index::hash::hash_file(&wf.abs_path)?);
         manifest.files.push(fastrag_index::FileEntry {
