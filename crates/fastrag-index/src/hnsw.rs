@@ -90,6 +90,18 @@ impl HnswIndex {
     pub fn set_manifest_model_id(&mut self, model_id: impl Into<String>) {
         self.manifest.embedding_model_id = model_id.into();
     }
+
+    /// Remove all entries whose `id` is in `ids` and rebuild the graph.
+    /// O(n) in total entries; cheap since add() already rebuilds per call.
+    pub fn remove_by_chunk_ids(&mut self, ids: &[u64]) {
+        if ids.is_empty() {
+            return;
+        }
+        let set: std::collections::HashSet<u64> = ids.iter().copied().collect();
+        self.entries.retain(|e| !set.contains(&e.id));
+        self.manifest.chunk_count = self.entries.len();
+        self.rebuild_graph();
+    }
 }
 
 impl crate::VectorIndex for HnswIndex {
@@ -273,6 +285,26 @@ mod tests {
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].entry.id, 1);
         assert!((hits[0].score - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn remove_by_chunk_ids_drops_matching_entries_and_rebuilds() {
+        let mut index = HnswIndex::new(3, manifest());
+        index
+            .add(vec![
+                entry(1, vec![1.0, 0.0, 0.0], "a"),
+                entry(2, vec![0.0, 1.0, 0.0], "b"),
+                entry(3, vec![0.0, 0.0, 1.0], "c"),
+            ])
+            .unwrap();
+
+        index.remove_by_chunk_ids(&[2]);
+        assert_eq!(index.len(), 2);
+        let ids: Vec<u64> = index.entries().iter().map(|e| e.id).collect();
+        assert_eq!(ids, vec![1, 3]);
+
+        let hits = index.query(&[0.0, 1.0, 0.0], 3).unwrap();
+        assert!(hits.iter().all(|h| h.entry.id != 2));
     }
 
     #[test]
