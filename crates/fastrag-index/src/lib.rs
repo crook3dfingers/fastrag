@@ -1,5 +1,6 @@
 mod entry;
 mod error;
+pub mod hash;
 mod hnsw;
 mod manifest;
 
