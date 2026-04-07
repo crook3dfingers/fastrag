@@ -41,8 +41,8 @@ impl MockEmbedder {
 }
 
 impl Embedder for MockEmbedder {
-    fn model_id(&self) -> &'static str {
-        "fastrag/mock-embedder-16d-v1"
+    fn model_id(&self) -> String {
+        format!("fastrag/mock-embedder-{}d-v1", Self::DIM)
     }
 
     fn dim(&self) -> usize {
@@ -102,6 +102,13 @@ mod tests {
     fn model_id_is_stable() {
         let e = MockEmbedder;
         assert_eq!(e.model_id(), "fastrag/mock-embedder-16d-v1");
+    }
+
+    #[test]
+    fn model_id_returns_owned_string() {
+        let e = MockEmbedder;
+        let id: String = e.model_id();
+        assert_eq!(id, "fastrag/mock-embedder-16d-v1");
     }
 
     #[test]

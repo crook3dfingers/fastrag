@@ -115,8 +115,8 @@ fn download_into(
 }
 
 impl Embedder for BgeSmallEmbedder {
-    fn model_id(&self) -> &'static str {
-        MODEL_REPO_ID
+    fn model_id(&self) -> String {
+        MODEL_REPO_ID.to_string()
     }
 
     fn dim(&self) -> usize {
