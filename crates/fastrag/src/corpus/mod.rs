@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::ops::collect_files;
 use crate::{
     ChunkingStrategy, Document, ElementKind, FastRagError, HnswIndex, IndexEntry, SearchHit,
     VectorIndex,
@@ -45,13 +44,24 @@ pub enum CorpusError {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct CorpusIndexStats {
     pub corpus_dir: PathBuf,
     pub input_dir: PathBuf,
     pub files_indexed: usize,
     pub chunk_count: usize,
     pub manifest: CorpusManifest,
+    #[serde(default)]
+    pub files_unchanged: usize,
+    #[serde(default)]
+    pub files_changed: usize,
+    #[serde(default)]
+    pub files_new: usize,
+    #[serde(default)]
+    pub files_deleted: usize,
+    #[serde(default)]
+    pub chunks_added: usize,
+    #[serde(default)]
+    pub chunks_removed: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -121,42 +131,77 @@ pub fn index_path_with_metadata(
     embedder: &dyn Embedder,
     base_metadata: &std::collections::BTreeMap<String, String>,
 ) -> Result<CorpusIndexStats, CorpusError> {
-    let mut files = if input.is_file() {
-        vec![input.to_path_buf()]
-    } else {
-        collect_files(input)
-    };
-    files.sort();
-    if files.is_empty() {
+    use crate::corpus::incremental::{plan_index, walk_for_plan};
+
+    let (root_abs, walked) = walk_for_plan(input)?;
+    if walked.is_empty() && !corpus_dir.join("manifest.json").exists() {
         return Err(CorpusError::NoParseableFiles(input.to_path_buf()));
     }
 
-    let mut manifest = CorpusManifest::new(
-        embedder.model_id().to_string(),
-        embedder.dim(),
-        current_unix_seconds(),
-        manifest_chunking_strategy_from(chunking),
-    );
-    let mut index = HnswIndex::new(embedder.dim(), manifest.clone());
-    index.set_manifest_model_id(embedder.model_id());
+    let mut index = if corpus_dir.join("manifest.json").exists() {
+        HnswIndex::load(corpus_dir)?
+    } else {
+        let m = CorpusManifest::new(
+            embedder.model_id().to_string(),
+            embedder.dim(),
+            current_unix_seconds(),
+            manifest_chunking_strategy_from(chunking),
+        );
+        HnswIndex::new(embedder.dim(), m)
+    };
 
-    let mut next_id: u64 = 1;
-    let mut total_chunks = 0usize;
+    let mut manifest = index.manifest().clone();
+    let plan = plan_index(&root_abs, walked, &mut manifest, &|p| {
+        fastrag_index::hash::hash_file(p)
+    })?;
 
-    for path in &files {
-        let doc = load_document(path)?;
-        let chunks = chunk_document(&doc, chunking);
-        total_chunks += chunks.len();
-
-        // Merge base metadata + per-file sidecar (sidecar wins on conflict).
-        let mut file_metadata = base_metadata.clone();
-        let sidecar_path = sidecar_path_for(path);
-        if sidecar_path.exists() {
-            let sidecar = load_metadata_sidecar(&sidecar_path)?;
-            file_metadata.extend(sidecar);
+    // Remove chunks for changed + deleted files.
+    let mut ids_to_remove: Vec<u64> = Vec::new();
+    for f in &plan.deleted {
+        ids_to_remove.extend(f.chunk_ids.iter().copied());
+    }
+    let changed_rels: std::collections::HashSet<_> =
+        plan.changed.iter().map(|w| w.rel_path.clone()).collect();
+    for f in &manifest.files {
+        if f.root_id == plan.root_id && changed_rels.contains(&f.rel_path) {
+            ids_to_remove.extend(f.chunk_ids.iter().copied());
         }
+    }
+    let chunks_removed = ids_to_remove.len();
+    index.remove_by_chunk_ids(&ids_to_remove);
 
-        let texts: Vec<&str> = chunks.iter().map(|chunk| chunk.text.as_str()).collect();
+    // Drop deleted + changed entries from manifest.files for this root (changed re-added below).
+    manifest.files.retain(|f| {
+        !(f.root_id == plan.root_id
+            && (plan.deleted.iter().any(|d| d.rel_path == f.rel_path)
+                || changed_rels.contains(&f.rel_path)))
+    });
+
+    // Update touched files' stat in place.
+    for (old, wf) in &plan.touched {
+        if let Some(entry) = manifest
+            .files
+            .iter_mut()
+            .find(|f| f.root_id == plan.root_id && f.rel_path == old.rel_path)
+        {
+            entry.size = wf.size;
+            entry.mtime_ns = wf.mtime_ns;
+        }
+    }
+
+    let mut next_id: u64 = index.entries().iter().map(|e| e.id).max().unwrap_or(0) + 1;
+    let mut chunks_added = 0usize;
+    let to_embed: Vec<_> = plan
+        .changed
+        .iter()
+        .chain(plan.new.iter())
+        .cloned()
+        .collect();
+
+    for wf in &to_embed {
+        let doc = load_document(&wf.abs_path)?;
+        let chunks = chunk_document(&doc, chunking);
+        let texts: Vec<&str> = chunks.iter().map(|c| c.text.as_str()).collect();
         let vectors = embedder.embed(&texts)?;
         if vectors.len() != chunks.len() {
             return Err(CorpusError::EmbeddingOutputMismatch {
@@ -165,42 +210,75 @@ pub fn index_path_with_metadata(
             });
         }
 
-        let entries = chunks
+        let mut file_metadata = base_metadata.clone();
+        let sidecar = sidecar_path_for(&wf.abs_path);
+        if sidecar.exists() {
+            file_metadata.extend(load_metadata_sidecar(&sidecar)?);
+        }
+
+        let mut chunk_ids = Vec::with_capacity(chunks.len());
+        let entries: Vec<IndexEntry> = chunks
             .into_iter()
             .zip(vectors.into_iter())
-            .map(|(chunk, vector)| IndexEntry {
-                id: next_id,
-                vector,
-                chunk_text: chunk.text.clone(),
-                source_path: path.to_path_buf(),
-                chunk_index: chunk.index,
-                section: chunk.section.clone(),
-                element_kinds: chunk.elements.iter().map(|e| e.kind.clone()).collect(),
-                pages: chunk
-                    .elements
-                    .iter()
-                    .filter_map(|e| e.page)
-                    .collect::<BTreeSet<_>>()
-                    .into_iter()
-                    .collect(),
-                language: chunk_language(&doc, &chunk),
-                metadata: file_metadata.clone(),
+            .map(|(chunk, vector)| {
+                let id = next_id;
+                next_id += 1;
+                chunk_ids.push(id);
+                IndexEntry {
+                    id,
+                    vector,
+                    chunk_text: chunk.text.clone(),
+                    source_path: wf.abs_path.clone(),
+                    chunk_index: chunk.index,
+                    section: chunk.section.clone(),
+                    element_kinds: chunk.elements.iter().map(|e| e.kind.clone()).collect(),
+                    pages: chunk
+                        .elements
+                        .iter()
+                        .filter_map(|e| e.page)
+                        .collect::<BTreeSet<_>>()
+                        .into_iter()
+                        .collect(),
+                    language: chunk_language(&doc, &chunk),
+                    metadata: file_metadata.clone(),
+                }
             })
-            .collect::<Vec<_>>();
-
-        next_id += entries.len() as u64;
+            .collect();
+        chunks_added += entries.len();
         index.add(entries)?;
+
+        let content_hash = Some(fastrag_index::hash::hash_file(&wf.abs_path)?);
+        manifest.files.push(fastrag_index::FileEntry {
+            root_id: plan.root_id,
+            rel_path: wf.rel_path.clone(),
+            size: wf.size,
+            mtime_ns: wf.mtime_ns,
+            content_hash,
+            chunk_ids,
+        });
     }
 
-    manifest.chunk_count = total_chunks;
+    manifest.version = 2;
+    if let Some(r) = manifest.roots.iter_mut().find(|r| r.id == plan.root_id) {
+        r.last_indexed_unix_seconds = current_unix_seconds();
+    }
+    manifest.chunk_count = index.entries().len();
+
+    index.replace_manifest(manifest.clone());
     index.save(corpus_dir)?;
 
     Ok(CorpusIndexStats {
         corpus_dir: corpus_dir.to_path_buf(),
         input_dir: input.to_path_buf(),
-        files_indexed: files.len(),
-        chunk_count: total_chunks,
+        files_indexed: plan.changed.len() + plan.new.len(),
+        chunk_count: index.entries().len(),
         manifest,
+        files_unchanged: plan.unchanged.len() + plan.touched.len(),
+        files_changed: plan.changed.len(),
+        files_new: plan.new.len(),
+        files_deleted: plan.deleted.len(),
+        chunks_added,
+        chunks_removed,
     })
 }
 

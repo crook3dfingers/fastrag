@@ -91,6 +91,10 @@ impl HnswIndex {
         self.manifest.embedding_model_id = model_id.into();
     }
 
+    pub fn replace_manifest(&mut self, manifest: crate::manifest::CorpusManifest) {
+        self.manifest = manifest;
+    }
+
     /// Remove all entries whose `id` is in `ids` and rebuild the graph.
     /// O(n) in total entries; cheap since add() already rebuilds per call.
     pub fn remove_by_chunk_ids(&mut self, ids: &[u64]) {
