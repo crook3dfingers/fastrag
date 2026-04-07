@@ -1,8 +1,8 @@
 #![cfg(feature = "http-embedders")]
 
+use fastrag_embed::Embedder;
 use fastrag_embed::http::ollama::OllamaEmbedder;
 use fastrag_embed::http::openai::OpenAIEmbedder;
-use fastrag_embed::Embedder;
 use serde_json::json;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -21,14 +21,12 @@ fn openai_embed_through_trait() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/embeddings"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(json!({
-                    "data": [
-                        { "embedding": vec![0.1_f32; 1536] },
-                        { "embedding": vec![0.2_f32; 1536] },
-                    ]
-                })),
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": [
+                    { "embedding": vec![0.1_f32; 1536] },
+                    { "embedding": vec![0.2_f32; 1536] },
+                ]
+            })))
             .mount(&server)
             .await;
         (server.uri(), server)
@@ -53,8 +51,7 @@ fn ollama_embed_through_trait() {
         Mock::given(method("POST"))
             .and(path("/api/embeddings"))
             .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(json!({ "embedding": vec![0.3_f32; 6] })),
+                ResponseTemplate::new(200).set_body_json(json!({ "embedding": vec![0.3_f32; 6] })),
             )
             .mount(&server)
             .await;

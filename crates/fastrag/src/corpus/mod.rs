@@ -36,6 +36,8 @@ pub enum CorpusError {
     EmbeddingOutputMismatch { expected: usize, got: usize },
     #[error("embedder returned no vectors")]
     EmptyEmbeddingOutput,
+    #[error("embedder mismatch: corpus was built with `{existing}`, caller provided `{requested}`")]
+    EmbedderMismatch { existing: String, requested: String },
     #[error("invalid metadata sidecar: {0}")]
     BadMetadataSidecar(String),
     #[cfg(feature = "rerank")]
@@ -139,7 +141,16 @@ pub fn index_path_with_metadata(
     }
 
     let mut index = if corpus_dir.join("manifest.json").exists() {
-        HnswIndex::load(corpus_dir)?
+        let idx = HnswIndex::load(corpus_dir)?;
+        let existing = idx.manifest().embedding_model_id.clone();
+        let requested = embedder.model_id().to_string();
+        if existing != requested {
+            return Err(CorpusError::EmbedderMismatch {
+                existing,
+                requested,
+            });
+        }
+        idx
     } else {
         let m = CorpusManifest::new(
             embedder.model_id().to_string(),
@@ -633,5 +644,59 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.to_string().contains("must be a string"));
+    }
+}
+
+#[cfg(all(test, feature = "embedding", feature = "index"))]
+mod embedder_mismatch_tests {
+    use super::*;
+    use fastrag_embed::test_utils::MockEmbedder;
+    use fastrag_embed::{EmbedError, Embedder};
+    use tempfile::tempdir;
+
+    #[derive(Debug, Default, Clone)]
+    struct AltMockEmbedder;
+
+    impl Embedder for AltMockEmbedder {
+        fn model_id(&self) -> String {
+            "fastrag/mock-embedder-32d-v1".to_string()
+        }
+
+        fn dim(&self) -> usize {
+            MockEmbedder::DIM
+        }
+
+        fn embed(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, EmbedError> {
+            MockEmbedder.embed(texts)
+        }
+    }
+
+    #[test]
+    fn index_rejects_different_embedder_against_existing_corpus() {
+        let docs = tempdir().unwrap();
+        std::fs::write(docs.path().join("a.txt"), "hello world").unwrap();
+        let corpus = tempdir().unwrap();
+
+        let chunking = ChunkingStrategy::Basic {
+            max_characters: 1000,
+            overlap: 0,
+        };
+
+        let e1 = MockEmbedder;
+        index_path(docs.path(), corpus.path(), &chunking, &e1).unwrap();
+
+        let e2 = AltMockEmbedder;
+        let err = index_path(docs.path(), corpus.path(), &chunking, &e2).unwrap_err();
+
+        match err {
+            CorpusError::EmbedderMismatch {
+                existing,
+                requested,
+            } => {
+                assert_eq!(existing, "fastrag/mock-embedder-16d-v1");
+                assert_eq!(requested, "fastrag/mock-embedder-32d-v1");
+            }
+            other => panic!("expected EmbedderMismatch, got {other:?}"),
+        }
     }
 }
