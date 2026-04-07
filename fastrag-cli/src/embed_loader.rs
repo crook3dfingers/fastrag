@@ -51,10 +51,15 @@ pub fn load_for_read(
         .ok_or_else(|| EmbedLoaderError::Manifest("missing embedding_model_id".into()))?
         .to_string();
 
-    let (kind, model_override) = match opts.kind {
-        Some(k) => (k, None),
-        None => detect_from_manifest(&existing)?,
-    };
+    let (detected_kind, model_override) = detect_from_manifest(&existing)?;
+    let kind = opts.kind.unwrap_or(detected_kind);
+
+    if kind != detected_kind {
+        return Err(EmbedLoaderError::Mismatch {
+            existing,
+            requested: kind_name(kind).to_string(),
+        });
+    }
 
     let mut effective = opts.clone();
     if let Some(m) = model_override {
@@ -89,6 +94,14 @@ fn detect_from_manifest(
         Err(EmbedLoaderError::Manifest(format!(
             "unrecognized embedding_model_id `{existing}`; pass --embedder explicitly"
         )))
+    }
+}
+
+fn kind_name(kind: EmbedderKindArg) -> &'static str {
+    match kind {
+        EmbedderKindArg::Bge => "bge",
+        EmbedderKindArg::Openai => "openai",
+        EmbedderKindArg::Ollama => "ollama",
     }
 }
 

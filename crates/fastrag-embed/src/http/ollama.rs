@@ -125,6 +125,8 @@ mod tests {
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     fn rt() -> tokio::runtime::Runtime {
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -143,6 +145,7 @@ mod tests {
 
     #[test]
     fn happy_path() {
+        let _guard = ENV_LOCK.lock().unwrap();
         let rt = rt();
         let (uri, _g) = rt.block_on(async {
             let server = MockServer::start().await;
@@ -159,6 +162,7 @@ mod tests {
 
     #[test]
     fn probe_failure_on_refused() {
+        let _guard = ENV_LOCK.lock().unwrap();
         unsafe { std::env::set_var("OLLAMA_HOST", "http://127.0.0.1:1") };
         let err = OllamaEmbedder::new("nomic-embed-text").unwrap_err();
         assert!(matches!(err, EmbedError::DimensionProbeFailed(_)));
@@ -166,6 +170,7 @@ mod tests {
 
     #[test]
     fn missing_model_404() {
+        let _guard = ENV_LOCK.lock().unwrap();
         let rt = rt();
         let (uri, _g) = rt.block_on(async {
             let server = MockServer::start().await;
@@ -196,6 +201,7 @@ mod tests {
 
     #[test]
     fn model_id_is_namespaced() {
+        let _guard = ENV_LOCK.lock().unwrap();
         let rt = rt();
         let (uri, _g) = rt.block_on(async {
             let server = MockServer::start().await;

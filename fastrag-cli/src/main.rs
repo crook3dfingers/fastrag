@@ -141,53 +141,55 @@ async fn main() {
             ollama_url,
             metadata,
         } => {
-            let chunking = chunking_from_args(
-                chunk_strategy,
-                chunk_size,
-                chunk_overlap,
-                chunk_separators,
-                similarity_threshold,
-                percentile_threshold,
-            );
-            let opts = embed_loader::EmbedderOptions {
-                kind: embedder,
-                model_path,
-                openai_model,
-                openai_base_url,
-                ollama_model,
-                ollama_url,
-            };
-            let embedder = embed_loader::load_for_write(&opts).unwrap_or_else(|e| {
-                eprintln!("Error loading embedder: {e}");
-                std::process::exit(1);
-            });
-            let base_metadata: std::collections::BTreeMap<String, String> =
-                metadata.into_iter().collect();
-            match ops::index_path_with_metadata(
-                &input,
-                &corpus,
-                &chunking,
-                embedder.as_ref(),
-                &base_metadata,
-            ) {
-                Ok(stats) => {
-                    println!("{}", serde_json::to_string_pretty(&stats).unwrap());
-                    println!(
-                        "indexed {} files ({} new, {} changed, {} unchanged, {} deleted) — {} chunks added, {} removed",
-                        stats.files_indexed,
-                        stats.files_new,
-                        stats.files_changed,
-                        stats.files_unchanged,
-                        stats.files_deleted,
-                        stats.chunks_added,
-                        stats.chunks_removed,
-                    );
-                }
-                Err(e) => {
-                    eprintln!("Error indexing {}: {e}", input.display());
+            tokio::task::block_in_place(|| {
+                let chunking = chunking_from_args(
+                    chunk_strategy,
+                    chunk_size,
+                    chunk_overlap,
+                    chunk_separators,
+                    similarity_threshold,
+                    percentile_threshold,
+                );
+                let opts = embed_loader::EmbedderOptions {
+                    kind: embedder,
+                    model_path,
+                    openai_model,
+                    openai_base_url,
+                    ollama_model,
+                    ollama_url,
+                };
+                let embedder = embed_loader::load_for_write(&opts).unwrap_or_else(|e| {
+                    eprintln!("Error loading embedder: {e}");
                     std::process::exit(1);
+                });
+                let base_metadata: std::collections::BTreeMap<String, String> =
+                    metadata.into_iter().collect();
+                match ops::index_path_with_metadata(
+                    &input,
+                    &corpus,
+                    &chunking,
+                    embedder.as_ref(),
+                    &base_metadata,
+                ) {
+                    Ok(stats) => {
+                        println!("{}", serde_json::to_string_pretty(&stats).unwrap());
+                        println!(
+                            "indexed {} files ({} new, {} changed, {} unchanged, {} deleted) — {} chunks added, {} removed",
+                            stats.files_indexed,
+                            stats.files_new,
+                            stats.files_changed,
+                            stats.files_unchanged,
+                            stats.files_deleted,
+                            stats.chunks_added,
+                            stats.chunks_removed,
+                        );
+                    }
+                    Err(e) => {
+                        eprintln!("Error indexing {}: {e}", input.display());
+                        std::process::exit(1);
+                    }
                 }
-            }
+            });
         }
         #[cfg(feature = "retrieval")]
         Command::Query {
@@ -203,41 +205,43 @@ async fn main() {
             ollama_url,
             filter,
         } => {
-            let opts = embed_loader::EmbedderOptions {
-                kind: embedder,
-                model_path,
-                openai_model,
-                openai_base_url,
-                ollama_model,
-                ollama_url,
-            };
-            let embedder = embed_loader::load_for_read(&corpus, &opts).unwrap_or_else(|e| {
-                eprintln!("Error loading embedder: {e}");
-                std::process::exit(1);
-            });
-            let filter_map = match filter.as_deref() {
-                Some(s) => match args::parse_filter(s) {
-                    Ok(m) => m,
-                    Err(e) => {
-                        eprintln!("Error parsing --filter: {e}");
-                        std::process::exit(2);
-                    }
-                },
-                None => std::collections::BTreeMap::new(),
-            };
-            match ops::query_corpus_with_filter(
-                &corpus,
-                &query,
-                top_k,
-                embedder.as_ref(),
-                &filter_map,
-            ) {
-                Ok(hits) => print_query_results(&hits, format),
-                Err(e) => {
-                    eprintln!("Error querying corpus {}: {e}", corpus.display());
+            tokio::task::block_in_place(|| {
+                let opts = embed_loader::EmbedderOptions {
+                    kind: embedder,
+                    model_path,
+                    openai_model,
+                    openai_base_url,
+                    ollama_model,
+                    ollama_url,
+                };
+                let embedder = embed_loader::load_for_read(&corpus, &opts).unwrap_or_else(|e| {
+                    eprintln!("Error loading embedder: {e}");
                     std::process::exit(1);
+                });
+                let filter_map = match filter.as_deref() {
+                    Some(s) => match args::parse_filter(s) {
+                        Ok(m) => m,
+                        Err(e) => {
+                            eprintln!("Error parsing --filter: {e}");
+                            std::process::exit(2);
+                        }
+                    },
+                    None => std::collections::BTreeMap::new(),
+                };
+                match ops::query_corpus_with_filter(
+                    &corpus,
+                    &query,
+                    top_k,
+                    embedder.as_ref(),
+                    &filter_map,
+                ) {
+                    Ok(hits) => print_query_results(&hits, format),
+                    Err(e) => {
+                        eprintln!("Error querying corpus {}: {e}", corpus.display());
+                        std::process::exit(1);
+                    }
                 }
-            }
+            });
         }
         #[cfg(feature = "retrieval")]
         Command::CorpusInfo { corpus } => match ops::corpus_info(&corpus) {

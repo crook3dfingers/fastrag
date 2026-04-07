@@ -124,6 +124,8 @@ mod tests {
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     fn rt() -> tokio::runtime::Runtime {
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -140,6 +142,7 @@ mod tests {
 
     #[test]
     fn happy_path_round_trip() {
+        let _guard = ENV_LOCK.lock().unwrap();
         let rt = rt();
         let (server_uri, _guard) = rt.block_on(async {
             let server = MockServer::start().await;
@@ -166,6 +169,7 @@ mod tests {
 
     #[test]
     fn api_error_401() {
+        let _guard = ENV_LOCK.lock().unwrap();
         let rt = rt();
         let (server_uri, _guard) = rt.block_on(async {
             let server = MockServer::start().await;
@@ -189,6 +193,7 @@ mod tests {
 
     #[test]
     fn length_mismatch() {
+        let _guard = ENV_LOCK.lock().unwrap();
         let rt = rt();
         let (server_uri, _guard) = rt.block_on(async {
             let server = MockServer::start().await;
@@ -213,6 +218,7 @@ mod tests {
 
     #[test]
     fn unknown_model_is_rejected() {
+        let _guard = ENV_LOCK.lock().unwrap();
         unsafe { std::env::set_var("OPENAI_API_KEY", "k") };
         let err = OpenAIEmbedder::new("text-embedding-9001").unwrap_err();
         match err {
@@ -226,6 +232,7 @@ mod tests {
 
     #[test]
     fn model_id_is_namespaced() {
+        let _guard = ENV_LOCK.lock().unwrap();
         unsafe { std::env::set_var("OPENAI_API_KEY", "k") };
         let e = OpenAIEmbedder::new("text-embedding-3-large").unwrap();
         assert_eq!(e.model_id(), "openai:text-embedding-3-large");
