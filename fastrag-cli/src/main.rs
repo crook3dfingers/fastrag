@@ -160,6 +160,16 @@ async fn main() {
             ) {
                 Ok(stats) => {
                     println!("{}", serde_json::to_string_pretty(&stats).unwrap());
+                    println!(
+                        "indexed {} files ({} new, {} changed, {} unchanged, {} deleted) — {} chunks added, {} removed",
+                        stats.files_indexed,
+                        stats.files_new,
+                        stats.files_changed,
+                        stats.files_unchanged,
+                        stats.files_deleted,
+                        stats.chunks_added,
+                        stats.chunks_removed,
+                    );
                 }
                 Err(e) => {
                     eprintln!("Error indexing {}: {e}", input.display());
