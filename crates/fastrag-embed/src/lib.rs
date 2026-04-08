@@ -10,6 +10,97 @@ pub mod test_utils;
 pub use crate::bge::BgeSmallEmbedder;
 pub use crate::error::EmbedError;
 
+use serde::{Deserialize, Serialize};
+
+/// A query-side input. Distinct from `PassageText` at the type level so prefix
+/// conventions cannot be confused.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueryText(String);
+
+impl QueryText {
+    pub fn new(s: impl Into<String>) -> Self {
+        Self(s.into())
+    }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// A passage-side input.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PassageText(String);
+
+impl PassageText {
+    pub fn new(s: impl Into<String>) -> Self {
+        Self(s.into())
+    }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Prefix pair used by asymmetric retrievers (E5, nomic, arctic, …). Empty
+/// strings mean "no prefix" (BGE-small, OpenAI, mock).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrefixScheme {
+    pub query: &'static str,
+    pub passage: &'static str,
+}
+
+impl PrefixScheme {
+    pub const NONE: PrefixScheme = PrefixScheme {
+        query: "",
+        passage: "",
+    };
+
+    pub const fn new(query: &'static str, passage: &'static str) -> Self {
+        Self { query, passage }
+    }
+
+    /// FNV-1a 64-bit hash of `"{query}\0{passage}"`. Deterministic across runs.
+    pub const fn hash(&self) -> u64 {
+        let mut h: u64 = 0xcbf29ce484222325;
+        let qb = self.query.as_bytes();
+        let mut i = 0;
+        while i < qb.len() {
+            h ^= qb[i] as u64;
+            h = h.wrapping_mul(0x100000001b3);
+            i += 1;
+        }
+        h ^= 0;
+        h = h.wrapping_mul(0x100000001b3);
+        let pb = self.passage.as_bytes();
+        let mut j = 0;
+        while j < pb.len() {
+            h ^= pb[j] as u64;
+            h = h.wrapping_mul(0x100000001b3);
+            j += 1;
+        }
+        h
+    }
+}
+
+/// Identity of the embedder that produced a corpus. Persisted in the manifest.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EmbedderIdentity {
+    pub model_id: String,
+    pub dim: usize,
+    pub prefix_scheme_hash: u64,
+}
+
+/// Fixed canary text, embedded once at corpus creation and re-embedded on load
+/// to detect silent drift.
+pub const CANARY_TEXT: &str =
+    "fastrag canary v1: the quick brown fox jumps over the lazy dog";
+
+pub const CANARY_COSINE_TOLERANCE: f32 = 0.999;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Canary {
+    pub text_version: u32,
+    pub vector: Vec<f32>,
+}
+
 /// An embedder produces fixed-size vectors for input texts.
 pub trait Embedder: Send + Sync {
     /// An identifier for the embedding model implementation used.
@@ -51,6 +142,44 @@ pub trait Embedder: Send + Sync {
             out.extend(self.embed(chunk)?);
         }
         Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod core_type_tests {
+    use super::*;
+
+    #[test]
+    fn prefix_scheme_hash_is_stable_for_same_prefixes() {
+        let a = PrefixScheme::new("query: ", "passage: ");
+        let b = PrefixScheme::new("query: ", "passage: ");
+        assert_eq!(a.hash(), b.hash());
+    }
+
+    #[test]
+    fn prefix_scheme_hash_differs_when_prefixes_differ() {
+        let a = PrefixScheme::new("query: ", "passage: ");
+        let b = PrefixScheme::new("search_query: ", "search_document: ");
+        assert_ne!(a.hash(), b.hash());
+    }
+
+    #[test]
+    fn query_and_passage_text_are_distinct_types() {
+        let q = QueryText::new("hi");
+        let p = PassageText::new("hi");
+        assert_eq!(q.as_str(), "hi");
+        assert_eq!(p.as_str(), "hi");
+    }
+
+    #[test]
+    fn embedder_identity_equality_is_field_wise() {
+        let a = EmbedderIdentity {
+            model_id: "fastrag/bge-small-en-v1.5".into(),
+            dim: 384,
+            prefix_scheme_hash: 0xDEADBEEF,
+        };
+        let b = a.clone();
+        assert_eq!(a, b);
     }
 }
 
