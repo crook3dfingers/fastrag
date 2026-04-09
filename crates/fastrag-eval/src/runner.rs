@@ -11,7 +11,7 @@ use crate::metrics::{hit_rate_at_k, mrr_at_k, ndcg_at_k, recall_at_k};
 use crate::report::{EvalReport, LatencyStats, MemoryStats};
 
 use fastrag_core::ChunkingStrategy;
-use fastrag_embed::Embedder;
+use fastrag_embed::{CANARY_TEXT, Canary, DynEmbedderTrait, PassageText, QueryText};
 use fastrag_index::{CorpusManifest, HnswIndex, IndexEntry, ManifestChunkingStrategy, VectorIndex};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,7 +29,7 @@ struct QueryGroundTruth {
 }
 
 pub struct Runner<'a> {
-    embedder: &'a dyn Embedder,
+    embedder: &'a dyn DynEmbedderTrait,
     chunking: ChunkingStrategy,
     dataset: &'a EvalDataset,
     top_k: usize,
@@ -37,7 +37,7 @@ pub struct Runner<'a> {
 
 impl<'a> Runner<'a> {
     pub fn new(
-        embedder: &'a dyn Embedder,
+        embedder: &'a dyn DynEmbedderTrait,
         chunking: ChunkingStrategy,
         dataset: &'a EvalDataset,
         top_k: usize,
@@ -68,7 +68,9 @@ impl<'a> Runner<'a> {
 
         for query in &self.dataset.queries {
             let query_started = Instant::now();
-            let query_vec = self.embedder.embed(&[query.text.as_str()])?;
+            let query_vec = self
+                .embedder
+                .embed_query_dyn(&[QueryText::new(query.text.as_str())])?;
             let query_vec = query_vec.into_iter().next().ok_or_else(|| {
                 EvalError::MalformedDataset("embedder returned no vectors".to_string())
             })?;
@@ -180,7 +182,7 @@ impl AggregatedMetrics {
 
 pub fn index_documents(
     dataset: &EvalDataset,
-    embedder: &dyn Embedder,
+    embedder: &dyn DynEmbedderTrait,
     chunking: &ChunkingStrategy,
 ) -> EvalResult<HnswIndex> {
     let mut memory_peak = sample_current_rss_bytes();
@@ -189,17 +191,27 @@ pub fn index_documents(
 
 fn index_documents_with_memory(
     dataset: &EvalDataset,
-    embedder: &dyn Embedder,
+    embedder: &dyn DynEmbedderTrait,
     chunking: &ChunkingStrategy,
     memory_peak: &mut u64,
 ) -> EvalResult<HnswIndex> {
+    let canary_vec = embedder
+        .embed_passage_dyn(&[PassageText::new(CANARY_TEXT)])
+        .map_err(|e| EvalError::MalformedDataset(e.to_string()))?
+        .into_iter()
+        .next()
+        .ok_or_else(|| EvalError::MalformedDataset("canary embed returned no vector".into()))?;
+    let canary = Canary {
+        text_version: 1,
+        vector: canary_vec,
+    };
     let manifest = CorpusManifest::new(
-        embedder.model_id().to_string(),
-        embedder.dim(),
+        embedder.identity(),
+        canary,
         current_unix_seconds(),
         manifest_chunking_strategy(chunking)?,
     );
-    let mut index = HnswIndex::new(embedder.dim(), manifest);
+    let mut index = HnswIndex::new(manifest);
     let mut next_id = 1u64;
     let mut chunk_records = Vec::new();
 
@@ -226,15 +238,15 @@ fn index_documents_with_memory(
 
     let texts = chunk_records
         .iter()
-        .map(|chunk| chunk.text.as_str())
+        .map(|chunk| PassageText::new(chunk.text.as_str()))
         .collect::<Vec<_>>();
     // Embedders like BGE materialize a (batch, seq, hidden) tensor, so embedding the
     // entire corpus in one shot blows RAM on real BEIR datasets. Delegate batching to the
-    // Embedder trait so each model can pick its own safe size.
+    // DynEmbedderTrait so each model can pick its own safe size.
     let batch = embedder.default_batch_size();
     let mut vectors = Vec::with_capacity(texts.len());
     for slice in texts.chunks(batch) {
-        let batch_vectors = embedder.embed(slice)?;
+        let batch_vectors = embedder.embed_passage_dyn(slice)?;
         vectors.extend(batch_vectors);
         *memory_peak = (*memory_peak).max(sample_current_rss_bytes());
     }
@@ -524,18 +536,33 @@ mod tests {
         struct LengthSpyEmbedder {
             spread_per_batch: Mutex<Vec<(usize, usize)>>,
         }
-        impl Embedder for LengthSpyEmbedder {
-            fn dim(&self) -> usize {
-                4
-            }
-            fn default_batch_size(&self) -> usize {
-                4
-            }
-            fn embed(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, fastrag_embed::EmbedError> {
-                let lens: Vec<usize> = texts.iter().map(|t| t.len()).collect();
+        impl fastrag_embed::Embedder for LengthSpyEmbedder {
+            const DIM: usize = 4;
+            const MODEL_ID: &'static str = "test/length-spy";
+            const PREFIX_SCHEME: fastrag_embed::PrefixScheme = fastrag_embed::PrefixScheme::NONE;
+            fn embed_query(
+                &self,
+                texts: &[fastrag_embed::QueryText],
+            ) -> Result<Vec<Vec<f32>>, fastrag_embed::EmbedError> {
+                let lens: Vec<usize> = texts.iter().map(|t| t.as_str().len()).collect();
                 let (lo, hi) = (*lens.iter().min().unwrap(), *lens.iter().max().unwrap());
                 self.spread_per_batch.lock().unwrap().push((lo, hi));
                 Ok(texts.iter().map(|_| vec![0.0; 4]).collect())
+            }
+            fn embed_passage(
+                &self,
+                texts: &[fastrag_embed::PassageText],
+            ) -> Result<Vec<Vec<f32>>, fastrag_embed::EmbedError> {
+                let lens: Vec<usize> = texts.iter().map(|t| t.as_str().len()).collect();
+                let (lo, hi) = (
+                    *lens.iter().min().unwrap_or(&0),
+                    *lens.iter().max().unwrap_or(&0),
+                );
+                self.spread_per_batch.lock().unwrap().push((lo, hi));
+                Ok(texts.iter().map(|_| vec![0.0; 4]).collect())
+            }
+            fn default_batch_size(&self) -> usize {
+                4
             }
         }
 
@@ -586,11 +613,14 @@ mod tests {
         .run()
         .unwrap();
         let batches = embedder.spread_per_batch.lock().unwrap().clone();
-        // First batch should contain the four shortest docs (10, 50, 250, 400), second
-        // batch the remaining one (500). Without sort the first batch would mix 500+10.
-        assert_eq!(batches.len(), 2);
-        let (first_lo, first_hi) = batches[0];
-        let (second_lo, _second_hi) = batches[1];
+        // Batch 0 is the canary passage (a single fixed text). Batches 1..N are the
+        // document chunks sorted by length. With batch_size=4 and 5 docs:
+        //   batch 1: [10, 50, 250, 400]
+        //   batch 2: [500]
+        // Without sort the first doc-batch would mix 500+10.
+        assert_eq!(batches.len(), 3, "expected canary batch + 2 doc batches");
+        let (first_lo, first_hi) = batches[1];
+        let (second_lo, _second_hi) = batches[2];
         assert_eq!(first_lo, 10);
         assert_eq!(first_hi, 400);
         assert_eq!(second_lo, 500);
