@@ -5,7 +5,7 @@ use candle_core::{DType, Device, Tensor};
 use candle_nn::VarBuilder;
 use tokenizers::{PaddingParams, PaddingStrategy, Tokenizer, TruncationParams};
 
-use crate::{EmbedError, Embedder};
+use crate::{Embedder, EmbedError, PassageText, PrefixScheme, QueryText};
 
 const MODEL_REPO_ID: &str = "BAAI/bge-small-en-v1.5";
 const MODEL_CACHE_SUBDIR: &str = "fastrag/models/bge-small-en-v1.5";
@@ -98,39 +98,8 @@ impl BgeSmallEmbedder {
 
         Self::from_local(&model_dir)
     }
-}
 
-fn download_into(
-    repo: &hf_hub::api::sync::ApiRepo,
-    filename: &str,
-    model_dir: &Path,
-) -> Result<(), EmbedError> {
-    let dst = model_dir.join(filename);
-    if dst.exists() {
-        return Ok(());
-    }
-    let src = repo.get(filename)?;
-    fs::copy(src, &dst)?;
-    Ok(())
-}
-
-impl Embedder for BgeSmallEmbedder {
-    fn model_id(&self) -> String {
-        MODEL_REPO_ID.to_string()
-    }
-
-    fn dim(&self) -> usize {
-        self.dim
-    }
-
-    fn default_batch_size(&self) -> usize {
-        // BGE-small materializes a (batch, seq_len, hidden=384) tensor on every forward
-        // pass. 32 keeps a 512-token batch under ~25 MB of activations and lets a 3.6k-doc
-        // BEIR run finish in <1 GB peak RSS on a CPU box.
-        32
-    }
-
-    fn embed(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, EmbedError> {
+    fn embed_raw(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, EmbedError> {
         if texts.is_empty() {
             return Err(EmbedError::EmptyInput);
         }
@@ -175,6 +144,40 @@ impl Embedder for BgeSmallEmbedder {
             }
         }
         Ok(vecs)
+    }
+}
+
+fn download_into(
+    repo: &hf_hub::api::sync::ApiRepo,
+    filename: &str,
+    model_dir: &Path,
+) -> Result<(), EmbedError> {
+    let dst = model_dir.join(filename);
+    if dst.exists() {
+        return Ok(());
+    }
+    let src = repo.get(filename)?;
+    fs::copy(src, &dst)?;
+    Ok(())
+}
+
+impl Embedder for BgeSmallEmbedder {
+    const DIM: usize = 384;
+    const MODEL_ID: &'static str = "fastrag/bge-small-en-v1.5";
+    const PREFIX_SCHEME: PrefixScheme = PrefixScheme::NONE;
+
+    fn embed_query(&self, texts: &[QueryText]) -> Result<Vec<Vec<f32>>, EmbedError> {
+        let refs: Vec<&str> = texts.iter().map(QueryText::as_str).collect();
+        self.embed_raw(&refs)
+    }
+
+    fn embed_passage(&self, texts: &[PassageText]) -> Result<Vec<Vec<f32>>, EmbedError> {
+        let refs: Vec<&str> = texts.iter().map(PassageText::as_str).collect();
+        self.embed_raw(&refs)
+    }
+
+    fn default_batch_size(&self) -> usize {
+        16
     }
 }
 
@@ -225,7 +228,9 @@ mod tests {
             return;
         }
         let embedder = BgeSmallEmbedder::from_hf_hub().unwrap();
-        let out = embedder.embed(&["hello world"]).unwrap();
+        let out = embedder
+            .embed_query(&[QueryText::new("hello world")])
+            .unwrap();
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].len(), EXPECTED_DIM);
     }
@@ -237,7 +242,11 @@ mod tests {
             return;
         }
         let embedder = BgeSmallEmbedder::from_hf_hub().unwrap();
-        let v = embedder.embed(&["hello world"]).unwrap().pop().unwrap();
+        let v = embedder
+            .embed_query(&[QueryText::new("hello world")])
+            .unwrap()
+            .pop()
+            .unwrap();
         let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
         assert!((norm - 1.0).abs() < 1e-4);
     }
@@ -249,17 +258,45 @@ mod tests {
             return;
         }
         let embedder = BgeSmallEmbedder::from_hf_hub().unwrap();
-        let a = embedder.embed(&["cat sits on mat"]).unwrap().pop().unwrap();
+        let a = embedder
+            .embed_query(&[QueryText::new("cat sits on mat")])
+            .unwrap()
+            .pop()
+            .unwrap();
         let b = embedder
-            .embed(&["a cat on the mat"])
+            .embed_query(&[QueryText::new("a cat on the mat")])
             .unwrap()
             .pop()
             .unwrap();
         let c = embedder
-            .embed(&["Rust async runtime"])
+            .embed_query(&[QueryText::new("Rust async runtime")])
             .unwrap()
             .pop()
             .unwrap();
         assert!(cosine(&a, &b) > cosine(&a, &c));
+    }
+}
+
+#[cfg(test)]
+mod invariant_tests {
+    use super::*;
+    use crate::{Embedder, PrefixScheme};
+
+    #[test]
+    fn bge_model_id_matches_fastrag_namespace() {
+        assert_eq!(BgeSmallEmbedder::MODEL_ID, "fastrag/bge-small-en-v1.5");
+    }
+
+    #[test]
+    fn bge_dim_is_384() {
+        assert_eq!(BgeSmallEmbedder::DIM, 384);
+    }
+
+    #[test]
+    fn bge_prefix_scheme_is_none() {
+        assert_eq!(
+            BgeSmallEmbedder::PREFIX_SCHEME.hash(),
+            PrefixScheme::NONE.hash()
+        );
     }
 }
