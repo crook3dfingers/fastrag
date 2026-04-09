@@ -1,4 +1,4 @@
-use crate::{EmbedError, Embedder};
+use crate::{EmbedError, Embedder, PassageText, PrefixScheme, QueryText};
 
 /// Deterministic hash-based embedder for tests.
 ///
@@ -9,12 +9,11 @@ use crate::{EmbedError, Embedder};
 pub struct MockEmbedder;
 
 impl MockEmbedder {
-    pub const DIM: usize = 16;
-
-    fn embed_one(&self, text: &str) -> Vec<f32> {
+    fn fingerprint(text: &str) -> Vec<f32> {
+        const DIM: usize = 16;
         let lower = text.to_lowercase();
         let bytes = lower.as_bytes();
-        let mut v = vec![0.0f32; Self::DIM];
+        let mut v = vec![0.0f32; DIM];
 
         if bytes.is_empty() {
             return v;
@@ -23,13 +22,13 @@ impl MockEmbedder {
         // Feature-hash byte trigrams into a small fixed vector.
         if bytes.len() < 3 {
             for (i, &b) in bytes.iter().enumerate() {
-                let idx = (b as usize).wrapping_add(i) % Self::DIM;
+                let idx = (b as usize).wrapping_add(i) % DIM;
                 v[idx] += 1.0;
             }
         } else {
             for w in bytes.windows(3) {
                 let h = fnv1a64(w);
-                let idx = (h as usize) % Self::DIM;
+                let idx = (h as usize) % DIM;
                 let sign = if (h >> 63) == 0 { 1.0 } else { -1.0 };
                 v[idx] += sign;
             }
@@ -41,19 +40,22 @@ impl MockEmbedder {
 }
 
 impl Embedder for MockEmbedder {
-    fn model_id(&self) -> String {
-        format!("fastrag/mock-embedder-{}d-v1", Self::DIM)
+    const DIM: usize = 16;
+    const MODEL_ID: &'static str = "fastrag/mock-embedder-16d-v1";
+    const PREFIX_SCHEME: PrefixScheme = PrefixScheme::NONE;
+
+    fn embed_query(&self, texts: &[QueryText]) -> Result<Vec<Vec<f32>>, EmbedError> {
+        Ok(texts
+            .iter()
+            .map(|t| Self::fingerprint(t.as_str()))
+            .collect())
     }
 
-    fn dim(&self) -> usize {
-        Self::DIM
-    }
-
-    fn embed(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, EmbedError> {
-        if texts.is_empty() {
-            return Err(EmbedError::EmptyInput);
-        }
-        Ok(texts.iter().map(|t| self.embed_one(t)).collect())
+    fn embed_passage(&self, texts: &[PassageText]) -> Result<Vec<Vec<f32>>, EmbedError> {
+        Ok(texts
+            .iter()
+            .map(|t| Self::fingerprint(t.as_str()))
+            .collect())
     }
 }
 
@@ -94,45 +96,55 @@ mod tests {
 
     #[test]
     fn dim_is_16() {
-        let e = MockEmbedder;
-        assert_eq!(e.dim(), 16);
+        assert_eq!(MockEmbedder::DIM, 16);
     }
 
     #[test]
     fn model_id_is_stable() {
-        let e = MockEmbedder;
-        assert_eq!(e.model_id(), "fastrag/mock-embedder-16d-v1");
-    }
-
-    #[test]
-    fn model_id_returns_owned_string() {
-        let e = MockEmbedder;
-        let id: String = e.model_id();
-        assert_eq!(id, "fastrag/mock-embedder-16d-v1");
+        assert_eq!(MockEmbedder::MODEL_ID, "fastrag/mock-embedder-16d-v1");
     }
 
     #[test]
     fn deterministic_for_same_input() {
         let e = MockEmbedder;
-        let a = e.embed(&["hello world"]).unwrap();
-        let b = e.embed(&["hello world"]).unwrap();
+        let a = e.embed_query(&[QueryText::new("hello world")]).unwrap();
+        let b = e.embed_query(&[QueryText::new("hello world")]).unwrap();
         assert_eq!(a, b);
     }
 
     #[test]
     fn batch_preserves_order() {
         let e = MockEmbedder;
-        let batch = e.embed(&["one", "two", "three"]).unwrap();
+        let batch = e
+            .embed_query(&[
+                QueryText::new("one"),
+                QueryText::new("two"),
+                QueryText::new("three"),
+            ])
+            .unwrap();
         assert_eq!(batch.len(), 3);
-        assert_eq!(batch[0], e.embed(&["one"]).unwrap()[0]);
-        assert_eq!(batch[1], e.embed(&["two"]).unwrap()[0]);
-        assert_eq!(batch[2], e.embed(&["three"]).unwrap()[0]);
+        assert_eq!(
+            batch[0],
+            e.embed_query(&[QueryText::new("one")]).unwrap()[0]
+        );
+        assert_eq!(
+            batch[1],
+            e.embed_query(&[QueryText::new("two")]).unwrap()[0]
+        );
+        assert_eq!(
+            batch[2],
+            e.embed_query(&[QueryText::new("three")]).unwrap()[0]
+        );
     }
 
     #[test]
     fn normalized_when_non_empty() {
         let e = MockEmbedder;
-        let v = e.embed(&["some text"]).unwrap().pop().unwrap();
+        let v = e
+            .embed_query(&[QueryText::new("some text")])
+            .unwrap()
+            .pop()
+            .unwrap();
         let norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
         assert!((norm - 1.0).abs() < 1e-6);
     }
@@ -140,9 +152,49 @@ mod tests {
     #[test]
     fn similar_texts_have_higher_cosine_than_unrelated() {
         let e = MockEmbedder;
-        let a = e.embed(&["cat sits on mat"]).unwrap().pop().unwrap();
-        let b = e.embed(&["a cat on the mat"]).unwrap().pop().unwrap();
-        let c = e.embed(&["Rust async runtime"]).unwrap().pop().unwrap();
+        let a = e
+            .embed_query(&[QueryText::new("cat sits on mat")])
+            .unwrap()
+            .pop()
+            .unwrap();
+        let b = e
+            .embed_query(&[QueryText::new("a cat on the mat")])
+            .unwrap()
+            .pop()
+            .unwrap();
+        let c = e
+            .embed_query(&[QueryText::new("Rust async runtime")])
+            .unwrap()
+            .pop()
+            .unwrap();
         assert!(cosine(&a, &b) > cosine(&a, &c));
+    }
+}
+
+#[cfg(test)]
+mod mock_invariant_tests {
+    use super::*;
+    use crate::{Embedder, PassageText, QueryText};
+
+    #[test]
+    fn mock_consts_are_pinned() {
+        assert_eq!(MockEmbedder::DIM, 16);
+        assert_eq!(MockEmbedder::MODEL_ID, "fastrag/mock-embedder-16d-v1");
+    }
+
+    #[test]
+    fn mock_embed_query_returns_16d_vectors() {
+        let m = MockEmbedder;
+        let v = m.embed_query(&[QueryText::new("hello")]).unwrap();
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].len(), 16);
+    }
+
+    #[test]
+    fn mock_query_and_passage_match_for_same_input() {
+        let m = MockEmbedder;
+        let q = m.embed_query(&[QueryText::new("same")]).unwrap();
+        let p = m.embed_passage(&[PassageText::new("same")]).unwrap();
+        assert_eq!(q, p);
     }
 }

@@ -7,7 +7,7 @@ use std::sync::Arc;
 use clap::Parser;
 use fastrag::ops::{self, collect_files, output_path, render_document};
 use fastrag::registry::ParserRegistry;
-use fastrag::{ChunkingStrategy, OutputFormat};
+use fastrag::{ChunkingStrategy, DynEmbedderTrait, OutputFormat};
 use fastrag_cli::args::{self, ChunkStrategyArg, Cli, Command, OutputFormatArg};
 use fastrag_cli::embed_loader;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -168,7 +168,7 @@ async fn main() {
                     &input,
                     &corpus,
                     &chunking,
-                    embedder.as_ref(),
+                    embedder.as_ref() as &dyn DynEmbedderTrait,
                     &base_metadata,
                 ) {
                     Ok(stats) => {
@@ -232,7 +232,7 @@ async fn main() {
                     &corpus,
                     &query,
                     top_k,
-                    embedder.as_ref(),
+                    embedder.as_ref() as &dyn DynEmbedderTrait,
                     &filter_map,
                 ) {
                     Ok(hits) => print_query_results(&hits, format),
@@ -244,13 +244,37 @@ async fn main() {
             });
         }
         #[cfg(feature = "retrieval")]
-        Command::CorpusInfo { corpus } => match ops::corpus_info(&corpus) {
-            Ok(info) => println!("{}", serde_json::to_string_pretty(&info).unwrap()),
-            Err(e) => {
-                eprintln!("Error reading corpus {}: {e}", corpus.display());
-                std::process::exit(1);
-            }
-        },
+        Command::CorpusInfo {
+            corpus,
+            model_path,
+            embedder,
+            openai_model,
+            openai_base_url,
+            ollama_model,
+            ollama_url,
+        } => {
+            tokio::task::block_in_place(|| {
+                let opts = embed_loader::EmbedderOptions {
+                    kind: embedder,
+                    model_path,
+                    openai_model,
+                    openai_base_url,
+                    ollama_model,
+                    ollama_url,
+                };
+                let emb = embed_loader::load_for_read(&corpus, &opts).unwrap_or_else(|e| {
+                    eprintln!("Error loading embedder: {e}");
+                    std::process::exit(1);
+                });
+                match ops::corpus_info(&corpus, emb.as_ref() as &dyn DynEmbedderTrait) {
+                    Ok(info) => println!("{}", serde_json::to_string_pretty(&info).unwrap()),
+                    Err(e) => {
+                        eprintln!("Error reading corpus {}: {e}", corpus.display());
+                        std::process::exit(1);
+                    }
+                }
+            });
+        }
         #[cfg(feature = "eval")]
         Command::Eval {
             dataset,

@@ -18,9 +18,6 @@ pub trait VectorIndex {
     fn add(&mut self, entries: Vec<IndexEntry>) -> IndexResult<()>;
     fn query(&self, vector: &[f32], top_k: usize) -> IndexResult<Vec<SearchHit>>;
     fn save(&self, dir: &Path) -> IndexResult<()>;
-    fn load(dir: &Path) -> IndexResult<Self>
-    where
-        Self: Sized;
     fn len(&self) -> usize;
     fn is_empty(&self) -> bool {
         self.len() == 0

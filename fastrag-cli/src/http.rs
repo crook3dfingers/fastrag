@@ -9,7 +9,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use fastrag::corpus::SearchHitDto;
-use fastrag::{Embedder, ops};
+use fastrag::{DynEmbedder, DynEmbedderTrait, ops};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use serde::Deserialize;
 use serde_json::json;
@@ -20,7 +20,7 @@ use tracing::{info, info_span, warn};
 #[derive(Clone)]
 struct AppState {
     corpus_dir: PathBuf,
-    embedder: Arc<dyn Embedder>,
+    embedder: DynEmbedder,
     metrics: PrometheusHandle,
 }
 
@@ -106,7 +106,7 @@ pub enum HttpError {
 pub async fn serve_http(
     corpus_dir: PathBuf,
     port: u16,
-    embedder: Arc<dyn Embedder>,
+    embedder: DynEmbedder,
     token: Option<String>,
 ) -> Result<(), HttpError> {
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
@@ -116,7 +116,7 @@ pub async fn serve_http(
 pub async fn serve_http_with_embedder(
     corpus_dir: PathBuf,
     listener: tokio::net::TcpListener,
-    embedder: Arc<dyn Embedder>,
+    embedder: DynEmbedder,
     token: Option<String>,
 ) -> Result<(), HttpError> {
     // The `metrics` crate allows exactly one global recorder per process, but in
@@ -141,7 +141,9 @@ pub async fn serve_http_with_embedder(
         "Number of entries in the loaded corpus index"
     );
 
-    if let Ok(info) = fastrag::corpus::corpus_info(&corpus_dir) {
+    if let Ok(info) =
+        fastrag::corpus::corpus_info(&corpus_dir, embedder.as_ref() as &dyn DynEmbedderTrait)
+    {
         metrics::gauge!("fastrag_index_entries").set(info.entry_count as f64);
     }
 
@@ -216,7 +218,7 @@ async fn query(
         &state.corpus_dir,
         &params.q,
         params.top_k,
-        state.embedder.as_ref(),
+        state.embedder.as_ref() as &dyn DynEmbedderTrait,
         &filter_map,
     );
 

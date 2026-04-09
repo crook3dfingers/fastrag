@@ -255,7 +255,7 @@ FastRAG ships three embedder backends, selectable via `--embedder`:
 
 OpenAI supports `text-embedding-3-small` (1536-d) and `text-embedding-3-large` (3072-d). Ollama probes the model's dimension on startup, so any pulled embedding model works.
 
-Once a corpus is indexed, `query` and `serve-http` read the backend from the manifest's `embedding_model_id`. Omit `--embedder` on read paths to use the recorded backend; passing an explicit `--embedder` that disagrees with the manifest is a hard error.
+Once a corpus is indexed, `query` and `serve-http` read the backend from the manifest's `identity.model_id` (manifest schema v3). Omit `--embedder` on read paths to use the recorded backend; passing an explicit `--embedder` that disagrees with the manifest is a hard error. On load, fastrag re-embeds a fixed canary string and verifies the cosine similarity against the stored canary vector (≥ 0.999) to detect silent embedder drift. Pre-v3 corpora are not supported and hard-fail with `UnsupportedSchema`.
 
 #### Testing against real APIs
 

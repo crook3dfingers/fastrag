@@ -1,8 +1,9 @@
 #![cfg(feature = "http-embedders")]
 
-use fastrag_embed::Embedder;
+use fastrag_embed::DynEmbedderTrait;
+use fastrag_embed::QueryText;
 use fastrag_embed::http::ollama::OllamaEmbedder;
-use fastrag_embed::http::openai::OpenAIEmbedder;
+use fastrag_embed::http::openai::OpenAiSmall;
 use serde_json::json;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -15,7 +16,7 @@ fn rt() -> tokio::runtime::Runtime {
 }
 
 #[test]
-fn openai_embed_through_trait() {
+fn openai_embed_through_dyn_trait() {
     let rt = rt();
     let (uri, _g) = rt.block_on(async {
         let server = MockServer::start().await;
@@ -32,19 +33,17 @@ fn openai_embed_through_trait() {
         (server.uri(), server)
     });
     unsafe { std::env::set_var("OPENAI_API_KEY", "k") };
-    let e: Box<dyn Embedder> = Box::new(
-        OpenAIEmbedder::new("text-embedding-3-small")
-            .unwrap()
-            .with_base_url(uri),
-    );
-    let vecs = e.embed(&["a", "b"]).unwrap();
+    let e: Box<dyn DynEmbedderTrait> = Box::new(OpenAiSmall::new().unwrap().with_base_url(uri));
+    let vecs = e
+        .embed_query_dyn(&[QueryText::new("a"), QueryText::new("b")])
+        .unwrap();
     assert_eq!(vecs.len(), 2);
     assert_eq!(e.dim(), 1536);
     assert_eq!(e.model_id(), "openai:text-embedding-3-small");
 }
 
 #[test]
-fn ollama_embed_through_trait() {
+fn ollama_embed_through_dyn_trait() {
     let rt = rt();
     let (uri, _g) = rt.block_on(async {
         let server = MockServer::start().await;
@@ -58,9 +57,13 @@ fn ollama_embed_through_trait() {
         (server.uri(), server)
     });
     unsafe { std::env::set_var("OLLAMA_HOST", &uri) };
-    let e: Box<dyn Embedder> = Box::new(OllamaEmbedder::new("nomic-embed-text").unwrap());
-    let vecs = e.embed(&["a", "b"]).unwrap();
+    let e: Box<dyn DynEmbedderTrait> =
+        Box::new(OllamaEmbedder::new("nomic-embed-text".into()).unwrap());
+    let vecs = e
+        .embed_query_dyn(&[QueryText::new("a"), QueryText::new("b")])
+        .unwrap();
     assert_eq!(vecs.len(), 2);
     assert_eq!(vecs[0].len(), 6);
-    assert_eq!(e.model_id(), "ollama:nomic-embed-text");
+    let id = e.identity();
+    assert_eq!(id.model_id, "ollama:nomic-embed-text");
 }

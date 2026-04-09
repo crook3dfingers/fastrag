@@ -70,9 +70,11 @@ fn index_and_query_with_openai_backend() {
         serde_json::from_slice(&std::fs::read(corpus.path().join("manifest.json")).unwrap())
             .unwrap();
     assert_eq!(
-        manifest["embedding_model_id"].as_str().unwrap(),
+        manifest["identity"]["model_id"].as_str().unwrap(),
         "openai:text-embedding-3-small"
     );
+    assert_eq!(manifest["identity"]["dim"].as_u64().unwrap(), 1536);
+    assert_eq!(manifest["version"].as_u64().unwrap(), 3);
 }
 
 #[test]
@@ -119,7 +121,7 @@ fn query_with_mismatched_embedder_flag_fails() {
     assert!(!out.status.success(), "expected non-zero exit");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("openai:text-embedding-3-small"),
-        "stderr should mention existing model_id, got: {stderr}"
+        stderr.contains("openai:text-embedding-3-small") && stderr.contains("identity mismatch"),
+        "stderr should mention identity mismatch + existing model_id, got: {stderr}"
     );
 }

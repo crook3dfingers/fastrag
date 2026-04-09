@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use fastrag_eval::{EvalDataset, Runner, load_by_name};
 
 use fastrag_cli::args::{EvalChunkingArg, EvalDatasetNameArg, EvalEmbedderArg};
-use fastrag_embed::Embedder;
+use fastrag_embed::DynEmbedderTrait;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn run_eval(
@@ -43,7 +43,7 @@ pub async fn run_eval(
             dataset.queries.iter().map(|q| q.id.as_str()).collect();
         dataset.qrels.retain(|q| kept.contains(q.query_id.as_str()));
     }
-    let embedder: Box<dyn Embedder> = match embedder {
+    let embedder: Box<dyn DynEmbedderTrait> = match embedder {
         EvalEmbedderArg::Mock => Box::new(fastrag_embed::test_utils::MockEmbedder),
         EvalEmbedderArg::BgeSmall => Box::new(fastrag_embed::BgeSmallEmbedder::from_hf_hub()?),
     };

@@ -222,6 +222,30 @@ pub enum Command {
         /// Corpus directory used for persistence
         #[arg(long)]
         corpus: PathBuf,
+
+        /// Optional local model path
+        #[arg(long)]
+        model_path: Option<PathBuf>,
+
+        /// Embedder backend to use. Auto-detected from corpus manifest if omitted.
+        #[arg(long, value_enum)]
+        embedder: Option<EmbedderKindArg>,
+
+        /// OpenAI model name.
+        #[arg(long, default_value = "text-embedding-3-small")]
+        openai_model: String,
+
+        /// OpenAI API base URL.
+        #[arg(long, default_value = "https://api.openai.com/v1")]
+        openai_base_url: String,
+
+        /// Ollama model name.
+        #[arg(long, default_value = "nomic-embed-text")]
+        ollama_model: String,
+
+        /// Ollama server URL.
+        #[arg(long, default_value = "http://localhost:11434")]
+        ollama_url: String,
     },
 
     /// Evaluate a retrieval setup on a BEIR-compatible dataset

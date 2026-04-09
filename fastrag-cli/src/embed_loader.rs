@@ -1,7 +1,14 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use fastrag::{BgeSmallEmbedder, Embedder};
+use fastrag::DynEmbedder;
+use fastrag_embed::{
+    BgeSmallEmbedder, DynEmbedderTrait, Embedder,
+    http::{
+        ollama::OllamaEmbedder,
+        openai::{OpenAiLarge, OpenAiSmall},
+    },
+};
 use thiserror::Error;
 
 use crate::args::EmbedderKindArg;
@@ -9,7 +16,7 @@ use crate::args::EmbedderKindArg;
 #[derive(Debug, Error)]
 pub enum EmbedLoaderError {
     #[error("embedding model error: {0}")]
-    Embed(#[from] fastrag::EmbedderError),
+    Embed(String),
     #[error("unsupported model path: {0}")]
     UnsupportedModelPath(PathBuf),
     #[error("io error: {0}")]
@@ -17,9 +24,15 @@ pub enum EmbedLoaderError {
     #[error("failed to parse corpus manifest: {0}")]
     Manifest(String),
     #[error(
-        "embedder mismatch: corpus built with `{existing}`, --embedder specifies `{requested}`"
+        "embedder identity mismatch: corpus built with `{existing}`, --embedder specifies `{requested}`"
     )]
-    Mismatch { existing: String, requested: String },
+    KindMismatch { existing: String, requested: String },
+}
+
+impl From<fastrag_embed::EmbedError> for EmbedLoaderError {
+    fn from(e: fastrag_embed::EmbedError) -> Self {
+        EmbedLoaderError::Embed(e.to_string())
+    }
 }
 
 #[derive(Clone)]
@@ -32,7 +45,7 @@ pub struct EmbedderOptions {
     pub ollama_url: String,
 }
 
-pub fn load_for_write(opts: &EmbedderOptions) -> Result<Arc<dyn Embedder>, EmbedLoaderError> {
+pub fn load_for_write(opts: &EmbedderOptions) -> Result<DynEmbedder, EmbedLoaderError> {
     let kind = opts.kind.unwrap_or(EmbedderKindArg::Bge);
     build(kind, opts)
 }
@@ -40,59 +53,47 @@ pub fn load_for_write(opts: &EmbedderOptions) -> Result<Arc<dyn Embedder>, Embed
 pub fn load_for_read(
     corpus_dir: &Path,
     opts: &EmbedderOptions,
-) -> Result<Arc<dyn Embedder>, EmbedLoaderError> {
+) -> Result<DynEmbedder, EmbedLoaderError> {
     let manifest_path = corpus_dir.join("manifest.json");
     let bytes = std::fs::read(&manifest_path)?;
     let value: serde_json::Value =
         serde_json::from_slice(&bytes).map_err(|e| EmbedLoaderError::Manifest(e.to_string()))?;
     let existing = value
-        .get("embedding_model_id")
+        .get("identity")
+        .and_then(|i| i.get("model_id"))
         .and_then(|v| v.as_str())
-        .ok_or_else(|| EmbedLoaderError::Manifest("missing embedding_model_id".into()))?
+        .ok_or_else(|| EmbedLoaderError::Manifest("missing identity.model_id".into()))?
         .to_string();
 
-    let (detected_kind, model_override) = detect_from_manifest(&existing)?;
+    let detected_kind = detect_from_model_id(&existing)?;
     let kind = opts.kind.unwrap_or(detected_kind);
-
     if kind != detected_kind {
-        return Err(EmbedLoaderError::Mismatch {
+        return Err(EmbedLoaderError::KindMismatch {
             existing,
             requested: kind_name(kind).to_string(),
         });
     }
 
     let mut effective = opts.clone();
-    if let Some(m) = model_override {
-        match kind {
-            EmbedderKindArg::Openai => effective.openai_model = m,
-            EmbedderKindArg::Ollama => effective.ollama_model = m,
-            EmbedderKindArg::Bge => {}
-        }
+    if let Some(rest) = existing.strip_prefix("openai:") {
+        effective.openai_model = rest.to_string();
+    } else if let Some(rest) = existing.strip_prefix("ollama:") {
+        effective.ollama_model = rest.to_string();
     }
 
-    let emb = build(kind, &effective)?;
-    let requested = emb.model_id();
-    if requested != existing {
-        return Err(EmbedLoaderError::Mismatch {
-            existing,
-            requested,
-        });
-    }
-    Ok(emb)
+    build(kind, &effective)
 }
 
-fn detect_from_manifest(
-    existing: &str,
-) -> Result<(EmbedderKindArg, Option<String>), EmbedLoaderError> {
-    if let Some(rest) = existing.strip_prefix("openai:") {
-        Ok((EmbedderKindArg::Openai, Some(rest.to_string())))
-    } else if let Some(rest) = existing.strip_prefix("ollama:") {
-        Ok((EmbedderKindArg::Ollama, Some(rest.to_string())))
-    } else if existing.starts_with("fastrag/bge") {
-        Ok((EmbedderKindArg::Bge, None))
+fn detect_from_model_id(existing: &str) -> Result<EmbedderKindArg, EmbedLoaderError> {
+    if existing.starts_with("openai:") {
+        Ok(EmbedderKindArg::Openai)
+    } else if existing.starts_with("ollama:") {
+        Ok(EmbedderKindArg::Ollama)
+    } else if existing == BgeSmallEmbedder::MODEL_ID {
+        Ok(EmbedderKindArg::Bge)
     } else {
         Err(EmbedLoaderError::Manifest(format!(
-            "unrecognized embedding_model_id `{existing}`; pass --embedder explicitly"
+            "unrecognized identity.model_id `{existing}`; pass --embedder explicitly"
         )))
     }
 }
@@ -105,29 +106,36 @@ fn kind_name(kind: EmbedderKindArg) -> &'static str {
     }
 }
 
-fn build(
-    kind: EmbedderKindArg,
-    opts: &EmbedderOptions,
-) -> Result<Arc<dyn Embedder>, EmbedLoaderError> {
+fn build(kind: EmbedderKindArg, opts: &EmbedderOptions) -> Result<DynEmbedder, EmbedLoaderError> {
     match kind {
         EmbedderKindArg::Bge => {
             let e = match &opts.model_path {
                 Some(path) => BgeSmallEmbedder::from_local(path)?,
                 None => BgeSmallEmbedder::from_hf_hub()?,
             };
-            Ok(Arc::new(e))
+            let arc: Arc<dyn DynEmbedderTrait> = Arc::new(e);
+            Ok(arc)
         }
-        EmbedderKindArg::Openai => {
-            use fastrag_embed::http::openai::OpenAIEmbedder;
-            let e = OpenAIEmbedder::new(opts.openai_model.clone())?
-                .with_base_url(opts.openai_base_url.clone());
-            Ok(Arc::new(e))
-        }
+        EmbedderKindArg::Openai => match opts.openai_model.as_str() {
+            "text-embedding-3-small" => {
+                let e = OpenAiSmall::new()?.with_base_url(opts.openai_base_url.clone());
+                let arc: Arc<dyn DynEmbedderTrait> = Arc::new(e);
+                Ok(arc)
+            }
+            "text-embedding-3-large" => {
+                let e = OpenAiLarge::new()?.with_base_url(opts.openai_base_url.clone());
+                let arc: Arc<dyn DynEmbedderTrait> = Arc::new(e);
+                Ok(arc)
+            }
+            other => Err(EmbedLoaderError::Manifest(format!(
+                "unknown OpenAI model `{other}` — supported: text-embedding-3-small, text-embedding-3-large"
+            ))),
+        },
         EmbedderKindArg::Ollama => {
-            use fastrag_embed::http::ollama::OllamaEmbedder;
             unsafe { std::env::set_var("OLLAMA_HOST", &opts.ollama_url) };
             let e = OllamaEmbedder::new(opts.ollama_model.clone())?;
-            Ok(Arc::new(e))
+            let arc: Arc<dyn DynEmbedderTrait> = Arc::new(e);
+            Ok(arc)
         }
     }
 }
