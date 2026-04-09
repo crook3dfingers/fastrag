@@ -9,10 +9,10 @@ use crate::{
     VectorIndex,
 };
 
-#[cfg(feature = "embedding")]
-use crate::Embedder;
 #[cfg(feature = "index")]
 use crate::{CorpusManifest, ManifestChunkingStrategy};
+
+use fastrag_embed::DynEmbedderTrait;
 
 pub mod incremental;
 
@@ -22,9 +22,8 @@ pub enum CorpusError {
     Io(#[from] std::io::Error),
     #[error("parse error: {0}")]
     Parse(#[from] FastRagError),
-    #[cfg(feature = "embedding")]
     #[error("embedding error: {0}")]
-    Embed(#[from] crate::EmbedderError),
+    Embed(String),
     #[cfg(feature = "index")]
     #[error("index error: {0}")]
     Index(#[from] crate::IndexError),
@@ -36,8 +35,6 @@ pub enum CorpusError {
     EmbeddingOutputMismatch { expected: usize, got: usize },
     #[error("embedder returned no vectors")]
     EmptyEmbeddingOutput,
-    #[error("embedder mismatch: corpus was built with `{existing}`, caller provided `{requested}`")]
-    EmbedderMismatch { existing: String, requested: String },
     #[error("invalid metadata sidecar: {0}")]
     BadMetadataSidecar(String),
     #[cfg(feature = "rerank")]
@@ -107,7 +104,7 @@ pub fn index_path(
     input: &Path,
     corpus_dir: &Path,
     chunking: &ChunkingStrategy,
-    embedder: &dyn Embedder,
+    embedder: &dyn DynEmbedderTrait,
 ) -> Result<CorpusIndexStats, CorpusError> {
     index_path_with_metadata(
         input,
@@ -130,7 +127,7 @@ pub fn index_path_with_metadata(
     input: &Path,
     corpus_dir: &Path,
     chunking: &ChunkingStrategy,
-    embedder: &dyn Embedder,
+    embedder: &dyn DynEmbedderTrait,
     base_metadata: &std::collections::BTreeMap<String, String>,
 ) -> Result<CorpusIndexStats, CorpusError> {
     use crate::corpus::incremental::{plan_index, walk_for_plan};
@@ -141,24 +138,26 @@ pub fn index_path_with_metadata(
     }
 
     let mut index = if corpus_dir.join("manifest.json").exists() {
-        let idx = HnswIndex::load(corpus_dir)?;
-        let existing = idx.manifest().embedding_model_id.clone();
-        let requested = embedder.model_id().to_string();
-        if existing != requested {
-            return Err(CorpusError::EmbedderMismatch {
-                existing,
-                requested,
-            });
-        }
-        idx
+        HnswIndex::load(corpus_dir, embedder)?
     } else {
+        use fastrag_embed::{CANARY_TEXT, Canary, PassageText};
+        let canary_vec = embedder
+            .embed_passage_dyn(&[PassageText::new(CANARY_TEXT)])
+            .map_err(|e| CorpusError::Embed(e.to_string()))?
+            .into_iter()
+            .next()
+            .ok_or(CorpusError::EmptyEmbeddingOutput)?;
+        let canary = Canary {
+            text_version: 1,
+            vector: canary_vec,
+        };
         let m = CorpusManifest::new(
-            embedder.model_id().to_string(),
-            embedder.dim(),
+            embedder.identity(),
+            canary,
             current_unix_seconds(),
             manifest_chunking_strategy_from(chunking),
         );
-        HnswIndex::new(embedder.dim(), m)
+        HnswIndex::new(m)
     };
 
     let mut manifest = index.manifest().clone();
@@ -216,7 +215,11 @@ pub fn index_path_with_metadata(
         let vectors: Vec<_> = if chunks.is_empty() {
             Vec::new()
         } else {
-            let vectors = embedder.embed(&texts)?;
+            use fastrag_embed::PassageText;
+            let owned: Vec<PassageText> = texts.iter().map(|t| PassageText::new(*t)).collect();
+            let vectors = embedder
+                .embed_passage_dyn(&owned)
+                .map_err(|e| CorpusError::Embed(e.to_string()))?;
             if vectors.len() != chunks.len() {
                 return Err(CorpusError::EmbeddingOutputMismatch {
                     expected: chunks.len(),
@@ -276,7 +279,6 @@ pub fn index_path_with_metadata(
         });
     }
 
-    manifest.version = 2;
     if let Some(r) = manifest.roots.iter_mut().find(|r| r.id == plan.root_id) {
         r.last_indexed_unix_seconds = current_unix_seconds();
     }
@@ -304,7 +306,7 @@ pub fn query_corpus(
     corpus_dir: &Path,
     query: &str,
     top_k: usize,
-    embedder: &dyn Embedder,
+    embedder: &dyn DynEmbedderTrait,
 ) -> Result<Vec<SearchHit>, CorpusError> {
     query_corpus_with_filter(
         corpus_dir,
@@ -325,12 +327,17 @@ pub fn query_corpus_with_filter(
     corpus_dir: &Path,
     query: &str,
     top_k: usize,
-    embedder: &dyn Embedder,
+    embedder: &dyn DynEmbedderTrait,
     filter: &std::collections::BTreeMap<String, String>,
 ) -> Result<Vec<SearchHit>, CorpusError> {
-    let index = HnswIndex::load(corpus_dir)?;
-    let mut vectors = embedder.embed(&[query])?;
-    let vector = vectors.pop().ok_or(CorpusError::EmptyEmbeddingOutput)?;
+    use fastrag_embed::QueryText;
+    let index = HnswIndex::load(corpus_dir, embedder)?;
+    let vector = embedder
+        .embed_query_dyn(&[QueryText::new(query)])
+        .map_err(|e| CorpusError::Embed(e.to_string()))?
+        .into_iter()
+        .next()
+        .ok_or(CorpusError::EmptyEmbeddingOutput)?;
 
     if filter.is_empty() {
         return Ok(index.query(&vector, top_k)?);
@@ -401,7 +408,7 @@ pub fn query_corpus_reranked(
     query: &str,
     top_k: usize,
     over_fetch: usize,
-    embedder: &dyn Embedder,
+    embedder: &dyn DynEmbedderTrait,
     reranker: &dyn fastrag_rerank::Reranker,
 ) -> Result<Vec<SearchHit>, CorpusError> {
     let fan_out = top_k.saturating_mul(over_fetch.max(1)).max(top_k);
@@ -413,8 +420,11 @@ pub fn query_corpus_reranked(
     Ok(reranked)
 }
 
-pub fn corpus_info(corpus_dir: &Path) -> Result<CorpusInfo, CorpusError> {
-    let index = HnswIndex::load(corpus_dir)?;
+pub fn corpus_info(
+    corpus_dir: &Path,
+    embedder: &dyn DynEmbedderTrait,
+) -> Result<CorpusInfo, CorpusError> {
+    let index = HnswIndex::load(corpus_dir, embedder)?;
     let mut source_files = index
         .entries()
         .iter()
@@ -555,7 +565,7 @@ mod tests {
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].entry.source_path.file_name().unwrap(), "alpha.txt");
 
-        let info = corpus_info(corpus.path()).unwrap();
+        let info = corpus_info(corpus.path(), &MockEmbedder).unwrap();
         assert_eq!(info.entry_count, 2);
         assert_eq!(info.source_files.len(), 2);
     }
@@ -647,27 +657,29 @@ mod tests {
     }
 }
 
-#[cfg(all(test, feature = "embedding", feature = "index"))]
+#[cfg(all(test, feature = "index"))]
 mod embedder_mismatch_tests {
     use super::*;
+    use crate::IndexError;
     use fastrag_embed::test_utils::MockEmbedder;
-    use fastrag_embed::{EmbedError, Embedder};
+    use fastrag_embed::{DynEmbedderTrait, EmbedError, PassageText, PrefixScheme, QueryText};
     use tempfile::tempdir;
 
+    /// An embedder with a different model_id from MockEmbedder, same dim.
     #[derive(Debug, Default, Clone)]
     struct AltMockEmbedder;
 
-    impl Embedder for AltMockEmbedder {
-        fn model_id(&self) -> String {
-            "fastrag/mock-embedder-32d-v1".to_string()
+    impl fastrag_embed::Embedder for AltMockEmbedder {
+        const DIM: usize = MockEmbedder::DIM;
+        const MODEL_ID: &'static str = "fastrag/mock-embedder-32d-v1";
+        const PREFIX_SCHEME: PrefixScheme = PrefixScheme::NONE;
+
+        fn embed_query(&self, texts: &[QueryText]) -> Result<Vec<Vec<f32>>, EmbedError> {
+            MockEmbedder.embed_query(texts)
         }
 
-        fn dim(&self) -> usize {
-            MockEmbedder::DIM
-        }
-
-        fn embed(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, EmbedError> {
-            MockEmbedder.embed(texts)
+        fn embed_passage(&self, texts: &[PassageText]) -> Result<Vec<Vec<f32>>, EmbedError> {
+            MockEmbedder.embed_passage(texts)
         }
     }
 
@@ -689,14 +701,45 @@ mod embedder_mismatch_tests {
         let err = index_path(docs.path(), corpus.path(), &chunking, &e2).unwrap_err();
 
         match err {
-            CorpusError::EmbedderMismatch {
+            CorpusError::Index(IndexError::IdentityMismatch {
                 existing,
                 requested,
-            } => {
+                ..
+            }) => {
                 assert_eq!(existing, "fastrag/mock-embedder-16d-v1");
                 assert_eq!(requested, "fastrag/mock-embedder-32d-v1");
             }
-            other => panic!("expected EmbedderMismatch, got {other:?}"),
+            other => panic!("expected CorpusError::Index(IdentityMismatch), got {other:?}"),
         }
+    }
+
+    #[test]
+    fn canary_is_written_on_index_create() {
+        use fastrag_embed::{CANARY_TEXT, Embedder as _};
+
+        let docs = sample_dir();
+        let corpus = tempdir().unwrap();
+        let e = MockEmbedder;
+        let dyn_e: &dyn DynEmbedderTrait = &e;
+        index_path(
+            docs.path(),
+            corpus.path(),
+            &ChunkingStrategy::Basic {
+                max_characters: 100,
+                overlap: 0,
+            },
+            dyn_e,
+        )
+        .unwrap();
+        let idx = HnswIndex::load(corpus.path(), dyn_e).unwrap();
+        assert!(!idx.manifest().canary.vector.is_empty());
+        assert_eq!(idx.manifest().canary.vector.len(), MockEmbedder::DIM);
+        let _ = CANARY_TEXT;
+    }
+
+    fn sample_dir() -> tempfile::TempDir {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("doc.txt"), "hello world foo bar").unwrap();
+        dir
     }
 }

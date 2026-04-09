@@ -123,9 +123,19 @@ mod tests {
     use fastrag_index::ManifestChunkingStrategy;
 
     fn empty_manifest() -> CorpusManifest {
+        use fastrag_embed::{Canary, EmbedderIdentity, PrefixScheme};
+        let identity = EmbedderIdentity {
+            model_id: "mock".to_string(),
+            dim: 3,
+            prefix_scheme_hash: PrefixScheme::NONE.hash(),
+        };
+        let canary = Canary {
+            text_version: 1,
+            vector: vec![0.0f32; 3],
+        };
         CorpusManifest::new(
-            "mock",
-            3,
+            identity,
+            canary,
             0,
             ManifestChunkingStrategy::Basic {
                 max_characters: 100,
