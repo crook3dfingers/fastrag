@@ -5,6 +5,9 @@ mod error;
 #[cfg(feature = "http-embedders")]
 pub mod http;
 
+#[cfg(feature = "llama-cpp")]
+pub mod llama_cpp;
+
 #[cfg(feature = "test-utils")]
 pub mod test_utils;
 

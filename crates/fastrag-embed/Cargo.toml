@@ -30,6 +30,7 @@ serde_json = "1"
 [features]
 test-utils = []
 http-embedders = ["dep:reqwest"]
+llama-cpp = ["http-embedders"]
 legacy-candle = [
     "dep:candle-core",
     "dep:candle-nn",
