@@ -90,8 +90,7 @@ pub struct EmbedderIdentity {
 
 /// Fixed canary text, embedded once at corpus creation and re-embedded on load
 /// to detect silent drift.
-pub const CANARY_TEXT: &str =
-    "fastrag canary v1: the quick brown fox jumps over the lazy dog";
+pub const CANARY_TEXT: &str = "fastrag canary v1: the quick brown fox jumps over the lazy dog";
 
 pub const CANARY_COSINE_TOLERANCE: f32 = 0.999;
 
