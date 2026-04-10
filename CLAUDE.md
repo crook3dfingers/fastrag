@@ -7,6 +7,8 @@ cargo test --workspace       # Run all tests
 cargo test --workspace --features retrieval  # Retrieval stack tests
 cargo clippy --workspace     # Lint
 cargo clippy --workspace --all-targets --features retrieval -- -D warnings  # Retrieval lint gate
+cargo test -p fastrag-embed --features llama-cpp       # llama-cpp backend unit tests
+FASTRAG_LLAMA_TEST=1 cargo test -p fastrag-cli --test llama_cpp_corpus_e2e -- --ignored  # Requires llama-server + GGUF model
 cargo fmt --check            # Format check
 cargo build --release        # Release build (binary at target/release/fastrag)
 ```

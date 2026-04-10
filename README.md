@@ -245,13 +245,24 @@ Quality, latency, and footprint baselines for the retrieval pipeline are tracked
 
 ### Embedder backends
 
-FastRAG ships three embedder backends, selectable via `--embedder`:
+FastRAG ships four embedder backends, selectable via `--embedder`:
 
-| Backend | Flag | Model flag | Base URL flag | Auth |
-|---|---|---|---|---|
-| Local BGE (default) | `--embedder bge` | `--model-path <dir>` (optional) | — | — |
-| OpenAI | `--embedder openai` | `--openai-model <name>` | `--openai-base-url <url>` | `OPENAI_API_KEY` env |
-| Ollama | `--embedder ollama` | `--ollama-model <name>` | `--ollama-url <url>` (or `OLLAMA_HOST`) | — |
+| Backend | Flag | Dim | Requirements |
+|---|---|---|---|
+| Local BGE (default) | `--embedder bge` | 384 | None (CPU, bundled weights) |
+| Qwen3-Embed-0.6B Q8 | `--embedder qwen3-q8` | 1024 | `llama-server` in `$PATH` |
+| OpenAI | `--embedder openai` | 1536 / 3072 | `OPENAI_API_KEY` env var |
+| Ollama | `--embedder ollama` | varies | Running Ollama instance |
+
+**Qwen3 setup:**
+
+```bash
+# Install llama-server from https://github.com/ggml-org/llama.cpp/releases (b5000+)
+fastrag doctor              # Verify llama-server installation and version
+fastrag index ./docs --corpus ./my-corpus --embedder qwen3-q8
+```
+
+The GGUF model downloads from HuggingFace Hub on first use and caches under `~/.cache/fastrag/models/`. Override with `$FASTRAG_MODEL_DIR`.
 
 OpenAI supports `text-embedding-3-small` (1536-d) and `text-embedding-3-large` (3072-d). Ollama probes the model's dimension on startup, so any pulled embedding model works.
 
