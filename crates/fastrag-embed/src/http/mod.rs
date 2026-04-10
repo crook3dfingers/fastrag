@@ -13,8 +13,7 @@ pub mod ollama;
 pub mod openai;
 
 /// Build a blocking reqwest client with sane timeouts for embedding APIs.
-#[allow(dead_code)]
-pub(crate) fn build_client() -> Result<Client, EmbedError> {
+pub fn build_client() -> Result<Client, EmbedError> {
     Client::builder()
         .timeout(Duration::from_secs(60))
         .connect_timeout(Duration::from_secs(10))
@@ -24,8 +23,7 @@ pub(crate) fn build_client() -> Result<Client, EmbedError> {
 
 /// Send a request with a single retry on connection errors or 5xx responses.
 /// Backoff is a fixed 500ms between the two attempts.
-#[allow(dead_code)]
-pub(crate) fn send_with_retry(make: impl Fn() -> RequestBuilder) -> Result<Response, EmbedError> {
+pub fn send_with_retry(make: impl Fn() -> RequestBuilder) -> Result<Response, EmbedError> {
     match make().send() {
         Ok(resp) if resp.status().is_server_error() => {
             std::thread::sleep(Duration::from_millis(500));
@@ -40,8 +38,7 @@ pub(crate) fn send_with_retry(make: impl Fn() -> RequestBuilder) -> Result<Respo
 }
 
 /// Read a response, returning an `Api` error if the status is not 2xx.
-#[allow(dead_code)]
-pub(crate) fn ensure_success(resp: Response) -> Result<Response, EmbedError> {
+pub fn ensure_success(resp: Response) -> Result<Response, EmbedError> {
     let status = resp.status();
     if status.is_success() {
         return Ok(resp);

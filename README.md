@@ -278,6 +278,33 @@ FASTRAG_E2E_OPENAI=1 OPENAI_API_KEY=sk-... cargo test -p fastrag-embed --feature
 
 CI never runs them.
 
+### Reranking
+
+A cross-encoder model rescores HNSW candidates as a second retrieval stage. Enabled by default; disable with `--no-rerank`.
+
+```bash
+# Query with ONNX reranker (default)
+fastrag query "payment terms" --corpus ./corpus --rerank=onnx
+
+# Query with llama-cpp reranker
+fastrag query "payment terms" --corpus ./corpus --rerank=llama-cpp
+
+# Skip reranking
+fastrag query "payment terms" --corpus ./corpus --no-rerank
+
+# Adjust over-fetch multiplier (default: 10x)
+fastrag query "payment terms" --corpus ./corpus --rerank-over-fetch 20
+```
+
+| Backend | Model | Size | License | Requirements |
+|---|---|---|---|---|
+| ONNX (default) | gte-reranker-modernbert-base | 149M params | Apache 2.0 | None (downloads on first use) |
+| llama-cpp | bge-reranker-v2-m3 Q8_0 | 568M | MIT | `llama-server` in `$PATH` |
+
+The ONNX model downloads from HuggingFace Hub on first use and caches under `~/.cache/fastrag/models/gte-reranker-modernbert-base/`. The llama-cpp backend spawns a separate `llama-server` subprocess in reranking mode (`--embedding --pooling rank`).
+
+The HTTP server accepts `?rerank=off` and `?over_fetch=N` query parameters to control reranking per request.
+
 ### Library
 
 ```rust
@@ -369,8 +396,9 @@ FastRAG uses a workspace of small, focused crates:
 - **`fastrag-pdf`**, **`fastrag-html`**, etc. — Format-specific parsers
 - **`fastrag`** — Facade library with `ParserRegistry` and auto-detection
 - **`fastrag-cli`** — Command-line interface
-- **`fastrag-embed`** — BGE-small embedding implementation and test mock
+- **`fastrag-embed`** — Embedding backends (BGE-small, Qwen3, OpenAI, Ollama)
 - **`fastrag-index`** — HNSW corpus index and persistence
+- **`fastrag-rerank`** — Cross-encoder reranking (ONNX, llama-cpp)
 - **`fastrag-mcp`** — MCP server for AI assistant integration
 
 Each parser is feature-gated, so you only compile what you need.

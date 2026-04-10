@@ -7,10 +7,17 @@
 use fastrag_index::SearchHit;
 use thiserror::Error;
 
+#[cfg(feature = "llama-cpp")]
+pub mod llama_cpp;
+#[cfg(feature = "onnx")]
+pub mod onnx;
+
 #[derive(Debug, Error)]
 pub enum RerankError {
     #[error("rerank model error: {0}")]
     Model(String),
+    #[error("HTTP: {0}")]
+    Http(String),
     #[error("I/O: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -26,6 +33,26 @@ pub trait Reranker: Send + Sync {
 #[cfg(any(feature = "test-utils", test))]
 pub mod test_utils {
     use super::*;
+
+    /// Build a `SearchHit` for testing. Produces a hit with the given id, text,
+    /// and initial score; all other fields are filled with defaults.
+    pub fn test_hit(id: u64, text: &str, score: f32) -> SearchHit {
+        SearchHit {
+            entry: fastrag_index::IndexEntry {
+                id,
+                vector: vec![],
+                chunk_text: text.to_string(),
+                source_path: std::path::PathBuf::from(format!("/tmp/doc{id}.txt")),
+                chunk_index: 0,
+                section: None,
+                element_kinds: vec![fastrag_index::ElementKind::Paragraph],
+                pages: vec![],
+                language: None,
+                metadata: std::collections::BTreeMap::new(),
+            },
+            score,
+        }
+    }
 
     /// Deterministic mock reranker that scores by lexical overlap between query
     /// and chunk text. Good enough to verify ordering changes in tests.
@@ -66,36 +93,16 @@ pub mod test_utils {
 
 #[cfg(test)]
 mod tests {
-    use super::test_utils::MockReranker;
+    use super::test_utils::{MockReranker, test_hit};
     use super::*;
-    use fastrag_index::{ElementKind, IndexEntry};
-    use std::path::PathBuf;
-
-    fn hit(id: u64, text: &str, score: f32) -> SearchHit {
-        SearchHit {
-            entry: IndexEntry {
-                id,
-                vector: vec![],
-                chunk_text: text.to_string(),
-                source_path: PathBuf::from(format!("/tmp/doc{id}.txt")),
-                chunk_index: 0,
-                section: None,
-                element_kinds: vec![ElementKind::Paragraph],
-                pages: vec![],
-                language: None,
-                metadata: std::collections::BTreeMap::new(),
-            },
-            score,
-        }
-    }
 
     #[test]
     fn mock_reranker_reorders_by_lexical_overlap() {
         // Initial order (by first-stage HNSW score) puts irrelevant hit first.
         let hits = vec![
-            hit(1, "the quick brown fox", 0.9),
-            hit(2, "rust async runtime concurrency", 0.8),
-            hit(3, "tokio async rust tasks", 0.7),
+            test_hit(1, "the quick brown fox", 0.9),
+            test_hit(2, "rust async runtime concurrency", 0.8),
+            test_hit(3, "tokio async rust tasks", 0.7),
         ];
         let reranked = MockReranker.rerank("rust async runtime", hits).unwrap();
 

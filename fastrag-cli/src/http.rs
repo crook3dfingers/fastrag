@@ -8,8 +8,8 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
-use fastrag::corpus::SearchHitDto;
-use fastrag::{DynEmbedder, DynEmbedderTrait, ops};
+use fastrag::corpus::{CorpusError, SearchHitDto};
+use fastrag::{DynEmbedder, DynEmbedderTrait, SearchHit, ops};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use serde::Deserialize;
 use serde_json::json;
@@ -22,6 +22,10 @@ struct AppState {
     corpus_dir: PathBuf,
     embedder: DynEmbedder,
     metrics: PrometheusHandle,
+    #[cfg(feature = "rerank")]
+    reranker: Option<std::sync::Arc<dyn fastrag_rerank::Reranker>>,
+    #[cfg(feature = "rerank")]
+    rerank_over_fetch: usize,
 }
 
 /// Shared-secret auth state. `None` = auth disabled (the server logs a warning
@@ -83,6 +87,12 @@ struct QueryParams {
     /// Comma-separated equality filters: `customer=acme,severity=high`.
     #[serde(default)]
     filter: Option<String>,
+    /// Set to `off` to skip reranking for this request.
+    #[serde(default)]
+    rerank: Option<String>,
+    /// Override the rerank over-fetch multiplier for this request.
+    #[serde(default)]
+    over_fetch: Option<usize>,
 }
 
 fn default_top_k() -> usize {
@@ -103,14 +113,35 @@ pub enum HttpError {
     Metrics(String),
 }
 
+/// Optional reranker configuration for the HTTP server.
+#[derive(Clone)]
+pub struct HttpRerankerConfig {
+    #[cfg(feature = "rerank")]
+    pub reranker: Option<std::sync::Arc<dyn fastrag_rerank::Reranker>>,
+    #[cfg(feature = "rerank")]
+    pub over_fetch: usize,
+}
+
+impl Default for HttpRerankerConfig {
+    fn default() -> Self {
+        Self {
+            #[cfg(feature = "rerank")]
+            reranker: None,
+            #[cfg(feature = "rerank")]
+            over_fetch: 10,
+        }
+    }
+}
+
 pub async fn serve_http(
     corpus_dir: PathBuf,
     port: u16,
     embedder: DynEmbedder,
     token: Option<String>,
+    rerank_cfg: HttpRerankerConfig,
 ) -> Result<(), HttpError> {
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
-    serve_http_with_embedder(corpus_dir, listener, embedder, token).await
+    serve_http_with_embedder(corpus_dir, listener, embedder, token, rerank_cfg).await
 }
 
 pub async fn serve_http_with_embedder(
@@ -118,6 +149,7 @@ pub async fn serve_http_with_embedder(
     listener: tokio::net::TcpListener,
     embedder: DynEmbedder,
     token: Option<String>,
+    rerank_cfg: HttpRerankerConfig,
 ) -> Result<(), HttpError> {
     // The `metrics` crate allows exactly one global recorder per process, but in
     // test binaries multiple serve_http_with_embedder calls share one process.
@@ -161,6 +193,10 @@ pub async fn serve_http_with_embedder(
         corpus_dir,
         embedder,
         metrics,
+        #[cfg(feature = "rerank")]
+        reranker: rerank_cfg.reranker,
+        #[cfg(feature = "rerank")]
+        rerank_over_fetch: rerank_cfg.over_fetch,
     };
 
     // /health stays unauthenticated for liveness probes.
@@ -191,6 +227,36 @@ async fn metrics_handler(State(state): State<AppState>) -> impl IntoResponse {
     state.metrics.render()
 }
 
+fn run_query(
+    state: &AppState,
+    params: &QueryParams,
+    filter_map: &std::collections::BTreeMap<String, String>,
+) -> Result<Vec<SearchHit>, CorpusError> {
+    #[cfg(feature = "rerank")]
+    {
+        let skip = params.rerank.as_deref() == Some("off");
+        if !skip && let Some(ref reranker) = state.reranker {
+            let over_fetch = params.over_fetch.unwrap_or(state.rerank_over_fetch);
+            return ops::query_corpus_reranked(
+                &state.corpus_dir,
+                &params.q,
+                params.top_k,
+                over_fetch,
+                state.embedder.as_ref() as &dyn DynEmbedderTrait,
+                reranker.as_ref(),
+                filter_map,
+            );
+        }
+    }
+    ops::query_corpus_with_filter(
+        &state.corpus_dir,
+        &params.q,
+        params.top_k,
+        state.embedder.as_ref() as &dyn DynEmbedderTrait,
+        filter_map,
+    )
+}
+
 async fn query(
     State(state): State<AppState>,
     Query(params): Query<QueryParams>,
@@ -214,13 +280,8 @@ async fn query(
         },
         None => std::collections::BTreeMap::new(),
     };
-    let result = ops::query_corpus_with_filter(
-        &state.corpus_dir,
-        &params.q,
-        params.top_k,
-        state.embedder.as_ref() as &dyn DynEmbedderTrait,
-        &filter_map,
-    );
+
+    let result = run_query(&state, &params, &filter_map);
 
     let elapsed = start.elapsed();
     metrics::counter!("fastrag_query_total").increment(1);

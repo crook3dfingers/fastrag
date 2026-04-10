@@ -14,6 +14,7 @@ path = "src/main.rs"
 fastrag.workspace = true
 fastrag-mcp = { workspace = true, optional = true }
 fastrag-embed = { workspace = true, optional = true }
+fastrag-rerank = { workspace = true, optional = true }
 fastrag-eval = { workspace = true, optional = true }
 clap = { version = "4", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
@@ -30,7 +31,7 @@ subtle = "2"
 dirs.workspace = true
 
 [features]
-default = ["language-detection", "mcp", "retrieval"]
+default = ["language-detection", "mcp", "retrieval", "rerank"]
 language-detection = ["fastrag/language-detection"]
 mcp = ["dep:fastrag-mcp"]
 retrieval = [
@@ -41,6 +42,17 @@ retrieval = [
     "fastrag-embed/http-embedders",
     "fastrag-embed/llama-cpp",
     "dep:axum",
+]
+rerank = [
+    "retrieval",
+    "fastrag/rerank",
+    "dep:fastrag-rerank",
+    "fastrag-rerank/onnx",
+]
+rerank-llama = [
+    "rerank",
+    "fastrag-rerank/llama-cpp",
+    "fastrag-embed/llama-cpp",
 ]
 eval = ["dep:fastrag-eval", "dep:fastrag-embed", "fastrag-embed/legacy-candle", "fastrag-embed/test-utils"]
 

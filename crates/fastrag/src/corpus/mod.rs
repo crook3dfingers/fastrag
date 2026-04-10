@@ -410,9 +410,10 @@ pub fn query_corpus_reranked(
     over_fetch: usize,
     embedder: &dyn DynEmbedderTrait,
     reranker: &dyn fastrag_rerank::Reranker,
+    filter: &std::collections::BTreeMap<String, String>,
 ) -> Result<Vec<SearchHit>, CorpusError> {
     let fan_out = top_k.saturating_mul(over_fetch.max(1)).max(top_k);
-    let first_stage = query_corpus(corpus_dir, query, fan_out, embedder)?;
+    let first_stage = query_corpus_with_filter(corpus_dir, query, fan_out, embedder, filter)?;
     let mut reranked = reranker
         .rerank(query, first_stage)
         .map_err(|e| CorpusError::Rerank(e.to_string()))?;

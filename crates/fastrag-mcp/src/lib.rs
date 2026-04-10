@@ -106,6 +106,14 @@ pub struct SearchCorpusParams {
     /// Equality filters applied to entry metadata (AND-combined)
     #[schemars(description = "Equality filters applied to entry metadata (AND-combined)")]
     pub filter: Option<std::collections::BTreeMap<String, String>>,
+    /// Reranker mode: "off" to skip, "onnx" or "llama-cpp" to rerank.
+    /// When omitted, no reranking is applied (MCP sessions don't auto-load models).
+    /// NOTE: Accepted in schema but not yet acted on — reranking in MCP is deferred
+    /// until model lifecycle management is resolved for long-running MCP sessions.
+    #[schemars(
+        description = "Reranker: 'off' (default) or 'onnx'/'llama-cpp' to apply cross-encoder reranking"
+    )]
+    pub rerank: Option<String>,
 }
 
 pub struct FastRagMcpServer {

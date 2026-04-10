@@ -10,6 +10,27 @@ repository.workspace = true
 fastrag-index.workspace = true
 thiserror.workspace = true
 
+# ONNX backend (optional)
+ort = { workspace = true, optional = true }
+tokenizers = { workspace = true, optional = true }
+hf-hub = { workspace = true, optional = true }
+dirs = { workspace = true, optional = true }
+
+ndarray = { version = "0.17", optional = true }
+
+# llama-cpp backend (optional)
+fastrag-embed = { workspace = true, optional = true, features = ["llama-cpp"] }
+serde_json = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+
+[dev-dependencies]
+wiremock = "0.6"
+tokio = { version = "1", features = ["rt", "macros"] }
+serde_json.workspace = true
+tempfile = "3"
+
 [features]
 default = []
 test-utils = []
+onnx = ["dep:ort", "dep:tokenizers", "dep:hf-hub", "dep:dirs", "dep:ndarray"]
+llama-cpp = ["dep:fastrag-embed", "dep:serde_json", "dep:serde"]

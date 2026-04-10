@@ -18,7 +18,7 @@ jobs:
       - name: Run tests
         run: cargo test --workspace
       - name: Clippy
-        run: cargo clippy --workspace -- -D warnings
+        run: cargo clippy --workspace --all-targets --features retrieval,rerank -- -D warnings
       - name: Format check
         run: cargo fmt --check
 
@@ -44,13 +44,13 @@ jobs:
           echo "LD_LIBRARY_PATH=/opt/llama" >> "$GITHUB_ENV"
           llama-server --version
 
-      - name: Cache GGUF model
+      - name: Cache GGUF models
         uses: actions/cache@v4
         with:
           path: ~/.cache/fastrag/models
-          key: gguf-qwen3-embed-600m-q8
+          key: gguf-qwen3-embed-600m-q8-bge-reranker-v2-m3-q8
 
-      - name: Download model (if not cached)
+      - name: Download embedder model (if not cached)
         run: |
           MODEL_DIR="$HOME/.cache/fastrag/models"
           MODEL_FILE="Qwen3-Embedding-0.6B-Q8_0.gguf"
@@ -59,8 +59,49 @@ jobs:
             curl -fsSL "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/$MODEL_FILE" -o "$MODEL_DIR/$MODEL_FILE"
           fi
 
-      - name: Run tests (including llama-cpp)
-        run: cargo test --workspace --features retrieval -- --include-ignored
+      - name: Download reranker model (if not cached)
+        run: |
+          MODEL_DIR="$HOME/.cache/fastrag/models"
+          MODEL_FILE="bge-reranker-v2-m3-q8_0.gguf"
+          if [ ! -f "$MODEL_DIR/$MODEL_FILE" ]; then
+            mkdir -p "$MODEL_DIR"
+            curl -fsSL "https://huggingface.co/klnstpr/bge-reranker-v2-m3-Q8_0-GGUF/resolve/main/$MODEL_FILE" -o "$MODEL_DIR/$MODEL_FILE"
+          fi
 
-      - name: Clippy (llama-cpp features)
-        run: cargo clippy --workspace --all-targets --features retrieval -- -D warnings
+      - name: Run tests (including llama-cpp + rerank)
+        run: cargo test --workspace --features retrieval,rerank-llama -- --include-ignored
+
+      - name: Clippy (llama-cpp + rerank features)
+        run: cargo clippy --workspace --all-targets --features retrieval,rerank-llama -- -D warnings
+
+  rerank-onnx:
+    runs-on: ubuntu-latest
+    env:
+      FASTRAG_RERANK_TEST: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: rerank-onnx
+
+      - name: Cache ONNX reranker model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/fastrag/models/gte-reranker-modernbert-base
+          key: onnx-gte-reranker-modernbert-base
+
+      - name: Download ONNX model (if not cached)
+        run: |
+          MODEL_DIR="$HOME/.cache/fastrag/models/gte-reranker-modernbert-base"
+          if [ ! -f "$MODEL_DIR/model.onnx" ] || [ ! -f "$MODEL_DIR/tokenizer.json" ]; then
+            mkdir -p "$MODEL_DIR"
+            curl -fsSL "https://huggingface.co/Alibaba-NLP/gte-reranker-modernbert-base/resolve/main/onnx/model.onnx" -o "$MODEL_DIR/model.onnx"
+            curl -fsSL "https://huggingface.co/Alibaba-NLP/gte-reranker-modernbert-base/resolve/main/tokenizer.json" -o "$MODEL_DIR/tokenizer.json"
+          fi
+
+      - name: Run rerank ONNX tests (including ignored)
+        run: cargo test -p fastrag-rerank --features onnx -- --include-ignored
+
+      - name: Run rerank e2e test
+        run: cargo test -p fastrag-cli --test rerank_onnx_e2e -- --include-ignored

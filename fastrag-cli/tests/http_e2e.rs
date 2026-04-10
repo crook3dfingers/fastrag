@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use fastrag::ChunkingStrategy;
 use fastrag::ops;
-use fastrag_cli::http::serve_http_with_embedder;
+use fastrag_cli::http::{HttpRerankerConfig, serve_http_with_embedder};
 use fastrag_embed::test_utils::MockEmbedder;
 use reqwest::Client;
 use reqwest::StatusCode;
@@ -50,7 +50,14 @@ async fn http_query_and_health_end_to_end() {
         let corpus_dir = corpus.path().to_path_buf();
         let embedder = Arc::new(MockEmbedder);
         async move {
-            let _ = serve_http_with_embedder(corpus_dir, listener, embedder, None).await;
+            let _ = serve_http_with_embedder(
+                corpus_dir,
+                listener,
+                embedder,
+                None,
+                HttpRerankerConfig::default(),
+            )
+            .await;
         }
     });
 
@@ -149,7 +156,14 @@ async fn spawn_server_with_token(
         let embedder = Arc::new(MockEmbedder);
         let token = token.clone();
         async move {
-            let _ = serve_http_with_embedder(corpus_dir, listener, embedder, token).await;
+            let _ = serve_http_with_embedder(
+                corpus_dir,
+                listener,
+                embedder,
+                token,
+                HttpRerankerConfig::default(),
+            )
+            .await;
         }
     });
     (addr, server, input, corpus)

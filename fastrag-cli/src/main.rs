@@ -208,6 +208,12 @@ async fn main() {
             ollama_model,
             ollama_url,
             filter,
+            #[cfg(feature = "rerank")]
+            rerank,
+            #[cfg(feature = "rerank")]
+            no_rerank,
+            #[cfg(feature = "rerank")]
+            rerank_over_fetch,
         } => {
             tokio::task::block_in_place(|| {
                 let opts = embed_loader::EmbedderOptions {
@@ -232,17 +238,49 @@ async fn main() {
                     },
                     None => std::collections::BTreeMap::new(),
                 };
-                match ops::query_corpus_with_filter(
-                    &corpus,
-                    &query,
-                    top_k,
-                    embedder.as_ref() as &dyn DynEmbedderTrait,
-                    &filter_map,
-                ) {
-                    Ok(hits) => print_query_results(&hits, format),
-                    Err(e) => {
-                        eprintln!("Error querying corpus {}: {e}", corpus.display());
-                        std::process::exit(1);
+
+                #[cfg(feature = "rerank")]
+                let use_rerank = !no_rerank;
+                #[cfg(not(feature = "rerank"))]
+                let use_rerank = false;
+
+                if use_rerank {
+                    #[cfg(feature = "rerank")]
+                    {
+                        let reranker = fastrag_cli::rerank_loader::load_reranker(rerank)
+                            .unwrap_or_else(|e| {
+                                eprintln!("Error loading reranker: {e}");
+                                std::process::exit(1);
+                            });
+                        match ops::query_corpus_reranked(
+                            &corpus,
+                            &query,
+                            top_k,
+                            rerank_over_fetch,
+                            embedder.as_ref() as &dyn DynEmbedderTrait,
+                            reranker.as_ref(),
+                            &filter_map,
+                        ) {
+                            Ok(hits) => print_query_results(&hits, format),
+                            Err(e) => {
+                                eprintln!("Error querying corpus {}: {e}", corpus.display());
+                                std::process::exit(1);
+                            }
+                        }
+                    }
+                } else {
+                    match ops::query_corpus_with_filter(
+                        &corpus,
+                        &query,
+                        top_k,
+                        embedder.as_ref() as &dyn DynEmbedderTrait,
+                        &filter_map,
+                    ) {
+                        Ok(hits) => print_query_results(&hits, format),
+                        Err(e) => {
+                            eprintln!("Error querying corpus {}: {e}", corpus.display());
+                            std::process::exit(1);
+                        }
                     }
                 }
             });
@@ -323,6 +361,12 @@ async fn main() {
             ollama_model,
             ollama_url,
             token,
+            #[cfg(feature = "rerank")]
+            rerank,
+            #[cfg(feature = "rerank")]
+            no_rerank,
+            #[cfg(feature = "rerank")]
+            rerank_over_fetch,
         } => {
             let token = token.or_else(|| std::env::var("FASTRAG_TOKEN").ok());
             let opts = embed_loader::EmbedderOptions {
@@ -337,7 +381,25 @@ async fn main() {
                 eprintln!("Error loading embedder: {e}");
                 std::process::exit(1);
             });
-            if let Err(e) = fastrag_cli::http::serve_http(corpus, port, embedder, token).await {
+
+            let mut rerank_cfg = fastrag_cli::http::HttpRerankerConfig::default();
+
+            #[cfg(feature = "rerank")]
+            {
+                if !no_rerank {
+                    let reranker = fastrag_cli::rerank_loader::load_reranker(rerank)
+                        .unwrap_or_else(|e| {
+                            eprintln!("Error loading reranker: {e}");
+                            std::process::exit(1);
+                        });
+                    rerank_cfg.reranker = Some(std::sync::Arc::from(reranker));
+                }
+                rerank_cfg.over_fetch = rerank_over_fetch;
+            }
+
+            if let Err(e) =
+                fastrag_cli::http::serve_http(corpus, port, embedder, token, rerank_cfg).await
+            {
                 eprintln!("Error starting HTTP server: {e}");
                 std::process::exit(1);
             }

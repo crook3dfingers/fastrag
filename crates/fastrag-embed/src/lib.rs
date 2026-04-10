@@ -5,6 +5,12 @@ mod error;
 #[cfg(feature = "http-embedders")]
 pub mod http;
 
+/// Re-exported blocking HTTP client type from the version of reqwest used by
+/// this crate. Downstream crates (e.g. `fastrag-rerank`) can reference this
+/// type without depending on reqwest directly.
+#[cfg(feature = "http-embedders")]
+pub type BlockingClient = reqwest::blocking::Client;
+
 #[cfg(feature = "llama-cpp")]
 pub mod llama_cpp;
 

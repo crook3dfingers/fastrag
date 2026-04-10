@@ -32,6 +32,13 @@ pub enum EmbedderKindArg {
     Qwen3Q8,
 }
 
+#[cfg(feature = "rerank")]
+#[derive(Clone, Copy, ValueEnum, PartialEq, Eq, Debug)]
+pub enum RerankerKindArg {
+    Onnx,
+    LlamaCpp,
+}
+
 #[derive(Parser)]
 #[command(name = "fastrag", about = "Fast document parser for AI/RAG pipelines")]
 #[command(version)]
@@ -218,6 +225,21 @@ pub enum Command {
         /// AND-combined; applied as a post-filter over the HNSW fan-out.
         #[arg(long)]
         filter: Option<String>,
+
+        /// Reranker backend (default: onnx). Reranking is on by default.
+        #[cfg(feature = "rerank")]
+        #[arg(long, value_enum, default_value = "onnx")]
+        rerank: RerankerKindArg,
+
+        /// Disable cross-encoder reranking.
+        #[cfg(feature = "rerank")]
+        #[arg(long, conflicts_with = "rerank")]
+        no_rerank: bool,
+
+        /// Over-fetch multiplier for reranking (fetch top_k * N from HNSW).
+        #[cfg(feature = "rerank")]
+        #[arg(long, default_value_t = 10)]
+        rerank_over_fetch: usize,
     },
 
     /// Show corpus metadata
@@ -345,6 +367,21 @@ pub enum Command {
         /// `Authorization: Bearer <token>`. /health stays unauthenticated.
         #[arg(long)]
         token: Option<String>,
+
+        /// Reranker backend (default: onnx). Reranking is on by default.
+        #[cfg(feature = "rerank")]
+        #[arg(long, value_enum, default_value = "onnx")]
+        rerank: RerankerKindArg,
+
+        /// Disable cross-encoder reranking.
+        #[cfg(feature = "rerank")]
+        #[arg(long, conflicts_with = "rerank")]
+        no_rerank: bool,
+
+        /// Over-fetch multiplier for reranking (fetch top_k * N from HNSW).
+        #[cfg(feature = "rerank")]
+        #[arg(long, default_value_t = 10)]
+        rerank_over_fetch: usize,
     },
 }
 

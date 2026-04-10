@@ -4,3 +4,5 @@ pub mod args;
 pub mod embed_loader;
 #[cfg(feature = "retrieval")]
 pub mod http;
+#[cfg(feature = "rerank")]
+pub mod rerank_loader;
