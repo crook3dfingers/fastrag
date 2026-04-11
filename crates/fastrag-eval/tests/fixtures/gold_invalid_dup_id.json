@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "entries": [
+    {"id": "q001", "question": "a?", "must_contain_cve_ids": ["CVE-2024-1"], "must_contain_terms": []},
+    {"id": "q001", "question": "b?", "must_contain_cve_ids": ["CVE-2024-2"], "must_contain_terms": []}
+  ]
+}
