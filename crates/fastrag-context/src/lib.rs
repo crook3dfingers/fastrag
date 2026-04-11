@@ -18,7 +18,7 @@ mod stage;
 #[cfg(any(feature = "test-utils", test))]
 pub mod test_utils;
 
-pub use cache::ContextCache;
+pub use cache::{CacheKey, CacheStatus, CachedContext, ContextCache};
 pub use contextualizer::{Contextualizer, ContextualizerMeta, NoContextualizer};
 #[cfg(feature = "llama-cpp")]
 pub use llama::LlamaCppContextualizer;
