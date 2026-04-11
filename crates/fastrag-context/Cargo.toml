@@ -16,15 +16,14 @@ serde_json = { workspace = true, optional = true }
 
 # llama-cpp completion backend (optional)
 fastrag-embed = { workspace = true, optional = true, features = ["llama-cpp"] }
-reqwest = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = "3"
 wiremock = "0.6"
-tokio = { version = "1", features = ["rt", "macros"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
 serde_json.workspace = true
 
 [features]
 default = []
-llama-cpp = ["dep:fastrag-embed", "dep:reqwest", "dep:serde", "dep:serde_json"]
+llama-cpp = ["dep:fastrag-embed", "dep:serde", "dep:serde_json"]
 test-utils = []

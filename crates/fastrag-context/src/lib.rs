@@ -33,9 +33,8 @@ pub const CTX_VERSION: u32 = 1;
 /// Error surface for the fastrag-context crate.
 #[derive(thiserror::Error, Debug)]
 pub enum ContextError {
-    #[cfg(feature = "llama-cpp")]
     #[error("llama-server HTTP error: {0}")]
-    Http(#[from] reqwest::Error),
+    Http(String),
     #[error("llama-server returned non-200: status={status}, body={body}")]
     BadStatus { status: u16, body: String },
     #[error("llama-server request timed out after {0:?}")]
