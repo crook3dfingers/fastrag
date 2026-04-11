@@ -73,6 +73,7 @@ hdrhistogram = "7.5.4"
 ort = { version = "2.0.0-rc.12", default-features = false, features = ["std", "download-binaries", "copy-dylibs", "tls-native"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 blake3 = "1.5"
+chrono = { version = "0.4", features = ["serde"] }
 regex = "1"
 
 [profile.dev]

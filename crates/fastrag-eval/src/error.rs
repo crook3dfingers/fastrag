@@ -44,6 +44,18 @@ pub enum EvalError {
     },
     #[error("gold set validation failed: {0}")]
     GoldSetInvalid(String),
+    #[error("runner error: {0}")]
+    Runner(String),
+    #[error("matrix variant {variant:?} failed: {source}")]
+    MatrixVariant {
+        variant: crate::matrix::ConfigVariant,
+        #[source]
+        source: Box<EvalError>,
+    },
+    #[error("--config-matrix requires --gold-set")]
+    MatrixRequiresGoldSet,
+    #[error("--config-matrix requires --corpus-no-contextual")]
+    MatrixMissingRawCorpus,
 }
 
 pub type EvalResult<T> = Result<T, EvalError>;

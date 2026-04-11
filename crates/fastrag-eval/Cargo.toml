@@ -7,10 +7,13 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+chrono = { workspace = true }
 dirs.workspace = true
+fastrag = { workspace = true, features = ["retrieval", "rerank", "hybrid"] }
 fastrag-core.workspace = true
 fastrag-embed.workspace = true
 fastrag-index.workspace = true
+fastrag-rerank.workspace = true
 hdrhistogram.workspace = true
 indicatif = "0.17"
 memory-stats.workspace = true
