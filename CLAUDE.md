@@ -115,14 +115,21 @@ Closes #6
 5. Register in `ParserRegistry::default()` in `crates/fastrag/src/registry.rs`
 6. Add test fixture in `tests/fixtures/`
 
-## CLI + MCP Parity
+## CLI and MCP Are Separate Surfaces
 
-Every user-facing operation must be exposed in both CLI and MCP server, both calling shared ops in `crates/fastrag/src/ops.rs`. When adding a new operation:
+CLI and MCP serve different users with different workflows. **Do not build MCP tools as 1:1 mirrors of CLI commands** — that is an anti-pattern that produces awkward MCP tools and bloats both surfaces.
 
-1. Add the function to `crates/fastrag/src/ops.rs`
-2. Add CLI subcommand/flag in `fastrag-cli/src/args.rs` and handler in `main.rs`
-3. Add MCP tool in `crates/fastrag-mcp/src/lib.rs` with `#[tool]` attribute
-4. Add tests for both CLI and MCP paths
+- **CLI** is for humans and scripts: batch operations, flags, exit codes, shell composition.
+- **MCP** is for LLM agents: use-case-oriented tools matching how an LLM reasons about a task. Tools may be narrower, broader, or wholly different from their CLI counterparts.
+
+Some operations belong only in CLI (ingest, maintenance, repair passes). Some belong only in MCP (query helpers tuned for LLM context). Some belong in both with different shapes. Decide per operation — don't default to mirroring.
+
+Shared logic still goes in `crates/fastrag/src/ops.rs` so both surfaces can call it, but the surfaces themselves are designed independently.
+
+When adding a new operation, ask:
+1. Does a human running this in a shell need it? → CLI.
+2. Does an LLM agent need this to answer a user question or drive a workflow? → MCP.
+3. If both: design each surface for its own caller. Do not force a shared shape.
 
 ## Development Discipline
 

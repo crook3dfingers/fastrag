@@ -19,7 +19,7 @@ Contextualization is opt-in per corpus (overnight cost on CPU), cached in a SQLi
 4. Bump manifest to `index_version: 2`. `HnswIndex::load` hard-errors on older corpora with a clear rebuild message.
 5. Index both dense vectors and Tantivy BM25 over contextualized text. Store raw text as Tantivy's `display_text` (stored, not indexed). Run CVE/CWE regex over raw text only.
 6. CLI gains `--contextualize`, `--context-model <preset>`, `--context-strict`, `--retry-failed` flags on `index`. `corpus-info` and `doctor` gain contextualizer reporting.
-7. MCP `parse_directory` tool gains `contextualize` and `strict` parameters.
+7. MCP surface is unchanged. Contextualization is an ingest/maintenance operation; it belongs in the CLI, not the agent-facing MCP tool set.
 8. Default ingest behavior is unchanged. On successful ingest without contextualization, print a one-line hint pointing to the flag.
 
 ## Non-goals
@@ -120,7 +120,7 @@ PRAGMA synchronous=NORMAL;
 - `raw_text` and `doc_title` are stored so `--retry-failed` can recover the strings needed to re-call `contextualize(doc_title, raw_text)` without opening the Tantivy or HNSW indexes. This makes the cache a portable artifact — copy the SQLite file to another machine and run the repair pass there.
 - `status='ok'` rows carry a non-null `context_text` and null `error`. `status='failed'` rows carry null `context_text` and a truncated (≤500 char) `error` string.
 - `INSERT OR REPLACE` is used on `put` so a subsequent successful retry overwrites a prior failure cleanly.
-- Rough storage cost: ~2 KB × rows for raw_text, negligible for everything else. A 40k-chunk corpus produces an ~80 MB SQLite file, which is small relative to the multi-GB GGUFs and HNSW indexes the tool already ships around.
+- Rough storage cost: ~2 KB × rows for raw_text, negligible for everything else. A 40k-chunk corpus produces an ~80 MB SQLite file, small relative to the multi-GB GGUFs and HNSW indexes.
 
 ### Manifest additions
 
@@ -246,18 +246,7 @@ fastrag doctor
 
 ## MCP surface
 
-`parse_directory` tool gains two optional params:
-
-```json
-{
-  "path": "./docs",
-  "corpus": "./corpus",
-  "contextualize": true,
-  "strict": false
-}
-```
-
-No new MCP tool. `--retry-failed` is CLI-only in the first PR — repair paths stay in the CLI until a real MCP use case surfaces.
+No changes. Indexing is a long-running ingest/maintenance operation; an LLM agent does not reach for it mid-conversation. CLI is the correct surface.
 
 ## Error handling
 

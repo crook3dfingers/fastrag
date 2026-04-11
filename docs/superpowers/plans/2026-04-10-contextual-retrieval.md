@@ -77,7 +77,6 @@ crates/fastrag-context/
 - `fastrag-cli/src/args.rs` — add contextualize flags to `Index` subcommand.
 - `fastrag-cli/src/main.rs` — wire flags through to ops layer; add end-of-run hint; add `--retry-failed` branch.
 - `fastrag-cli/src/doctor.rs` — add contextualizer section.
-- `crates/fastrag-mcp/src/lib.rs` — add `index_corpus` MCP tool (see Phase 7 note).
 - `CLAUDE.md` — add feature flag and test commands to Build & Test section.
 - `README.md` — add Contextual Retrieval section.
 - `.github/workflows/ci.yml` (or whatever CI file exists — verify in Task 6.4) — add nightly `contextual-retrieval` job.
@@ -3530,78 +3529,15 @@ Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
 
 # Phase 7 — MCP tool + docs
 
-## Task 7.1: Decision point — add `index_corpus` MCP tool
+## Task 7.1: MCP surface — no changes
 
-**The pre-existing gap:** `parse_directory` does not index. There is no current MCP tool that indexes a corpus. The spec says MCP `parse_directory` gains `contextualize` params, but that is based on a misreading of the existing surface. Two options:
+Indexing is an ingest/maintenance operation. Humans run it in a shell with a cost model that spans hours. It is not a tool an LLM agent reaches for mid-conversation. Per the updated `CLAUDE.md` rule ("CLI and MCP Are Separate Surfaces"), the MCP surface gets no changes in this step. The spec's original `parse_directory` extension was a parity-driven misread — drop it.
 
-**A) Add a new `index_corpus` MCP tool (recommended).** Fixes the pre-existing MCP parity gap for indexing as part of Step 5. Scope creep: ~80 lines of new code in `fastrag-mcp/src/lib.rs`. Matches the CLAUDE.md "every user-facing op exposed in both CLI and MCP" rule.
-
-**B) Drop MCP parity from Step 5.** Ship Step 5 with CLI-only and file a separate issue for the `index_corpus` MCP tool. Smaller PR, cleanly scoped, but leaves the parity rule unmet.
-
-- [ ] **Decision:** choose A unless the reviewer asks for B. Proceed with A below.
-
-## Task 7.2: Add `index_corpus` MCP tool
-
-**Files:**
-- Modify: `crates/fastrag-mcp/src/lib.rs`
-
-- [ ] **Step 1: Define `IndexCorpusParams`**
-
-```rust
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct IndexCorpusParams {
-    #[schemars(description = "Absolute path to the directory of documents to index")]
-    pub input: String,
-    #[schemars(description = "Absolute path to the corpus directory (created if missing)")]
-    pub corpus: String,
-    #[schemars(description = "Opt in to Contextual Retrieval (overnight cost on CPU)")]
-    pub contextualize: Option<bool>,
-    #[schemars(description = "Hard-fail on any per-chunk contextualization error")]
-    pub strict: Option<bool>,
-}
-```
-
-- [ ] **Step 2: Add the tool handler**
-
-```rust
-#[tool(description = "Index a directory of documents into a fastrag corpus. Supports optional Contextual Retrieval.")]
-async fn index_corpus(
-    &self,
-    Parameters(params): Parameters<IndexCorpusParams>,
-) -> Result<String, String> {
-    use std::path::PathBuf;
-    let input = PathBuf::from(&params.input);
-    let corpus = PathBuf::from(&params.corpus);
-    let contextualize = params.contextualize.unwrap_or(false);
-    let strict = params.strict.unwrap_or(false);
-
-    tokio::task::spawn_blocking(move || {
-        // Wire through to ops::index_path_with_metadata with the contextualize
-        // options, the same way fastrag-cli/src/main.rs does. Extract the
-        // setup code from main.rs into a shared helper in
-        // crates/fastrag/src/corpus/cli_helper.rs so CLI and MCP call the
-        // same function.
-        index_corpus_shared(&input, &corpus, contextualize, strict)
-            .map_err(|e| e.to_string())
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-```
-
-`index_corpus_shared` is a new helper in `crates/fastrag/src/corpus/` that handles the contextualizer spawn and teardown. Extract it from Phase 5's CLI handler code so CLI and MCP call the same function.
-
-- [ ] **Step 3: Build**
-
-```bash
-cargo build -p fastrag-mcp --features mcp,contextual
-```
-
-Expected: clean.
+- [ ] **Decision recorded:** MCP surface unchanged in Step 5. Contextualization is CLI-only.
 
 ---
 
-## Task 7.3: Update `CLAUDE.md`
+## Task 7.2: Update `CLAUDE.md`
 
 **Files:**
 - Modify: `CLAUDE.md`
@@ -3632,11 +3568,7 @@ cargo run -- index --corpus ./corpus --contextualize --retry-failed
 cargo run -- corpus-info --corpus ./corpus  # now shows contextualized: true/false
 ```
 
-Additions to the MCP Tools table:
-
-```markdown
-| `index_corpus` | Index a directory into a fastrag corpus (supports --contextualize) |
-```
+No changes to the MCP Tools table. Contextualization is CLI-only per the "CLI and MCP Are Separate Surfaces" rule.
 
 - [ ] **Step 2: Write the file through `doc-editor`**
 
