@@ -87,9 +87,15 @@ pub fn diff(report: &MatrixReport, baseline: &Baseline) -> Result<BaselineDiff, 
             .runs
             .iter()
             .find(|r| r.variant == base.variant)
-            .ok_or_else(|| EvalError::BaselineVariantMissing(base.variant))?;
+            .ok_or(EvalError::BaselineVariantMissing(base.variant))?;
 
-        check(&mut regressions, base.variant, "hit@5", base.hit_at_5, run.hit_at_5);
+        check(
+            &mut regressions,
+            base.variant,
+            "hit@5",
+            base.hit_at_5,
+            run.hit_at_5,
+        );
         check(
             &mut regressions,
             base.variant,
@@ -128,12 +134,36 @@ mod tests {
 
     fn mk_report(primary_hit5: f64, primary_mrr: f64) -> MatrixReport {
         let zero_pct = LatencyPercentiles {
-            total: Percentiles { p50_us: 0, p95_us: 0, p99_us: 0 },
-            embed: Percentiles { p50_us: 0, p95_us: 0, p99_us: 0 },
-            bm25: Percentiles { p50_us: 0, p95_us: 0, p99_us: 0 },
-            hnsw: Percentiles { p50_us: 0, p95_us: 0, p99_us: 0 },
-            rerank: Percentiles { p50_us: 0, p95_us: 0, p99_us: 0 },
-            fuse: Percentiles { p50_us: 0, p95_us: 0, p99_us: 0 },
+            total: Percentiles {
+                p50_us: 0,
+                p95_us: 0,
+                p99_us: 0,
+            },
+            embed: Percentiles {
+                p50_us: 0,
+                p95_us: 0,
+                p99_us: 0,
+            },
+            bm25: Percentiles {
+                p50_us: 0,
+                p95_us: 0,
+                p99_us: 0,
+            },
+            hnsw: Percentiles {
+                p50_us: 0,
+                p95_us: 0,
+                p99_us: 0,
+            },
+            rerank: Percentiles {
+                p50_us: 0,
+                p95_us: 0,
+                p99_us: 0,
+            },
+            fuse: Percentiles {
+                p50_us: 0,
+                p95_us: 0,
+                p99_us: 0,
+            },
         };
         MatrixReport {
             schema_version: 1,
@@ -178,7 +208,11 @@ mod tests {
         // threshold = 0.82 * 0.98 = 0.8036
         // 0.8036 meets the threshold (>= comparison internally is `<` so we need > threshold)
         let d = diff(&mk_report(0.8036, 0.71), &mk_baseline(0.82, 0.71)).unwrap();
-        assert!(!d.has_regressions(), "boundary should pass, got: {:?}", d.regressions);
+        assert!(
+            !d.has_regressions(),
+            "boundary should pass, got: {:?}",
+            d.regressions
+        );
     }
 
     #[test]

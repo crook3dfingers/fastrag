@@ -62,7 +62,9 @@ pub enum EvalError {
         #[source]
         source: serde_json::Error,
     },
-    #[error("baseline schema mismatch: baseline version {baseline_version}, report version {report_version}")]
+    #[error(
+        "baseline schema mismatch: baseline version {baseline_version}, report version {report_version}"
+    )]
     BaselineSchemaMismatch {
         baseline_version: u32,
         report_version: u32,
