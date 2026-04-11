@@ -314,7 +314,7 @@ pub enum Command {
         #[arg(
             long,
             conflicts_with = "dataset_name",
-            required_unless_present = "dataset_name"
+            required_unless_present_any = ["dataset_name", "gold_set"]
         )]
         dataset: Option<PathBuf>,
 
@@ -357,6 +357,27 @@ pub enum Command {
         /// Cap the eval to the first N queries (sampled baselines)
         #[arg(long)]
         max_queries: Option<usize>,
+
+        /// Path to a gold-set JSON file. Mutually exclusive with --dataset-name/--dataset.
+        #[arg(long)]
+        gold_set: Option<PathBuf>,
+
+        /// Path to a built corpus (contextualized when --config-matrix is set).
+        #[arg(long)]
+        corpus: Option<PathBuf>,
+
+        /// Path to a second corpus built without --contextualize.
+        /// Required when --config-matrix is set.
+        #[arg(long)]
+        corpus_no_contextual: Option<PathBuf>,
+
+        /// Run all 4 matrix variants. Requires --gold-set, --corpus, --corpus-no-contextual.
+        #[arg(long, default_value_t = false)]
+        config_matrix: bool,
+
+        /// Path to a checked-in baseline JSON. Non-zero exit on >2% regression.
+        #[arg(long)]
+        baseline: Option<PathBuf>,
     },
 
     /// Start HTTP retrieval server
