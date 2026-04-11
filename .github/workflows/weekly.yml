@@ -113,6 +113,12 @@ jobs:
       - name: Run eval matrix
         id: run_eval
         run: |
+          BASELINE_ARG=""
+          if [ -f docs/eval-baselines/current.json ]; then
+            BASELINE_ARG="--baseline docs/eval-baselines/current.json"
+          else
+            echo "No baseline committed yet — running without regression gate."
+          fi
           cargo run --release \
             --features eval,retrieval,rerank,hybrid,contextual,contextual-llama -- \
             eval \
@@ -120,7 +126,7 @@ jobs:
             --corpus "$RUNNER_TEMP/corpus-ctx" \
             --corpus-no-contextual "$RUNNER_TEMP/corpus-raw" \
             --config-matrix \
-            --baseline docs/eval-baselines/current.json \
+            $BASELINE_ARG \
             --report "$RUNNER_TEMP/matrix.json"
 
       - name: Upload matrix report
