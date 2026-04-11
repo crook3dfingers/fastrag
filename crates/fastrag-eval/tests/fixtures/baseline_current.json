@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "git_rev": "baseline_commit_abc",
+  "captured_at": "2026-04-11T00:00:00Z",
+  "runs": [
+    {"variant": "Primary",      "hit_at_5": 0.82, "mrr_at_10": 0.71},
+    {"variant": "NoRerank",     "hit_at_5": 0.74, "mrr_at_10": 0.63},
+    {"variant": "NoContextual", "hit_at_5": 0.71, "mrr_at_10": 0.60},
+    {"variant": "DenseOnly",    "hit_at_5": 0.65, "mrr_at_10": 0.55}
+  ]
+}

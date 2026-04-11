@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "git_rev": "fresh_commit_def",
+  "captured_at": "2026-04-12T00:00:00Z",
+  "runs": [
+    {"variant": "Primary",      "hit_at_1": 0.5, "hit_at_5": 0.83, "hit_at_10": 0.90, "mrr_at_10": 0.72, "latency": {"total":{"p50_us":0,"p95_us":0,"p99_us":0},"embed":{"p50_us":0,"p95_us":0,"p99_us":0},"bm25":{"p50_us":0,"p95_us":0,"p99_us":0},"hnsw":{"p50_us":0,"p95_us":0,"p99_us":0},"rerank":{"p50_us":0,"p95_us":0,"p99_us":0},"fuse":{"p50_us":0,"p95_us":0,"p99_us":0}}, "per_question": []},
+    {"variant": "NoRerank",     "hit_at_1": 0.4, "hit_at_5": 0.75, "hit_at_10": 0.85, "mrr_at_10": 0.64, "latency": {"total":{"p50_us":0,"p95_us":0,"p99_us":0},"embed":{"p50_us":0,"p95_us":0,"p99_us":0},"bm25":{"p50_us":0,"p95_us":0,"p99_us":0},"hnsw":{"p50_us":0,"p95_us":0,"p99_us":0},"rerank":{"p50_us":0,"p95_us":0,"p99_us":0},"fuse":{"p50_us":0,"p95_us":0,"p99_us":0}}, "per_question": []},
+    {"variant": "NoContextual", "hit_at_1": 0.3, "hit_at_5": 0.72, "hit_at_10": 0.80, "mrr_at_10": 0.61, "latency": {"total":{"p50_us":0,"p95_us":0,"p99_us":0},"embed":{"p50_us":0,"p95_us":0,"p99_us":0},"bm25":{"p50_us":0,"p95_us":0,"p99_us":0},"hnsw":{"p50_us":0,"p95_us":0,"p99_us":0},"rerank":{"p50_us":0,"p95_us":0,"p99_us":0},"fuse":{"p50_us":0,"p95_us":0,"p99_us":0}}, "per_question": []},
+    {"variant": "DenseOnly",    "hit_at_1": 0.2, "hit_at_5": 0.66, "hit_at_10": 0.75, "mrr_at_10": 0.56, "latency": {"total":{"p50_us":0,"p95_us":0,"p99_us":0},"embed":{"p50_us":0,"p95_us":0,"p99_us":0},"bm25":{"p50_us":0,"p95_us":0,"p99_us":0},"hnsw":{"p50_us":0,"p95_us":0,"p99_us":0},"rerank":{"p50_us":0,"p95_us":0,"p99_us":0},"fuse":{"p50_us":0,"p95_us":0,"p99_us":0}}, "per_question": []}
+  ],
+  "rerank_delta": 0.08,
+  "contextual_delta": 0.11,
+  "hybrid_delta": 0.17
+}
