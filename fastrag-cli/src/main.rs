@@ -381,6 +381,7 @@ async fn main() {
                                 embedder.as_ref() as &dyn DynEmbedderTrait,
                                 reranker.as_ref(),
                                 &filter_map,
+                                &mut fastrag::corpus::LatencyBreakdown::default(),
                             )
                         }
                     }
@@ -411,6 +412,7 @@ async fn main() {
                         top_k,
                         embedder.as_ref() as &dyn DynEmbedderTrait,
                         &filter_map,
+                        &mut fastrag::corpus::LatencyBreakdown::default(),
                     )
                 };
 

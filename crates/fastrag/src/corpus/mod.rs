@@ -465,6 +465,7 @@ pub fn query_corpus(
     query: &str,
     top_k: usize,
     embedder: &dyn DynEmbedderTrait,
+    breakdown: &mut LatencyBreakdown,
 ) -> Result<Vec<SearchHit>, CorpusError> {
     query_corpus_with_filter(
         corpus_dir,
@@ -472,6 +473,7 @@ pub fn query_corpus(
         top_k,
         embedder,
         &std::collections::BTreeMap::new(),
+        breakdown,
     )
 }
 
@@ -481,38 +483,67 @@ pub fn query_corpus(
 /// The over-fetch factor starts at 4×; if the filter eliminates every hit, the
 /// search is retried once with 16× over-fetch before giving up and returning
 /// an empty vec. An empty filter short-circuits the retry loop.
+/// Two-stage filtered retrieval: HNSW returns `top_k * over_fetch` candidates,
+/// an equality filter is applied, and the top-k survivors are returned.
+///
+/// The over-fetch factor starts at 4×; if the filter eliminates every hit, the
+/// search is retried once with 16× over-fetch before giving up and returning
+/// an empty vec. An empty filter short-circuits the retry loop.
+///
+/// `breakdown` is populated with embed + HNSW timing. `embed_us` is always
+/// recorded on the first (and only) embed call. `hnsw_us` records the timing
+/// of the HNSW call that ultimately returns results (first non-empty iteration,
+/// or the final iteration). `bm25_us`, `fuse_us`, and `rerank_us` are left at
+/// zero. Call `breakdown.finalize()` is called before every return path.
 pub fn query_corpus_with_filter(
     corpus_dir: &Path,
     query: &str,
     top_k: usize,
     embedder: &dyn DynEmbedderTrait,
     filter: &std::collections::BTreeMap<String, String>,
+    breakdown: &mut LatencyBreakdown,
 ) -> Result<Vec<SearchHit>, CorpusError> {
     use fastrag_embed::QueryText;
+    use std::time::Instant;
+
     let index = HnswIndex::load(corpus_dir, embedder)?;
+
+    let t = Instant::now();
     let vector = embedder
         .embed_query_dyn(&[QueryText::new(query)])
         .map_err(|e| CorpusError::Embed(e.to_string()))?
         .into_iter()
         .next()
         .ok_or(CorpusError::EmptyEmbeddingOutput)?;
+    breakdown.embed_us = t.elapsed().as_micros() as u64;
 
     if filter.is_empty() {
-        return Ok(index.query(&vector, top_k)?);
+        let t = Instant::now();
+        let result = index.query(&vector, top_k)?;
+        breakdown.hnsw_us = t.elapsed().as_micros() as u64;
+        breakdown.finalize();
+        return Ok(result);
     }
 
+    // Adaptive over-fetch + post-filter. embed_us is set once above.
+    // hnsw_us records the iteration that ultimately returns results
+    // (first non-empty), or the final retry if all iterations are empty.
     for factor in [4usize, 16] {
         let fan_out = top_k.saturating_mul(factor).max(top_k);
+        let t = Instant::now();
         let hits = index.query(&vector, fan_out)?;
+        breakdown.hnsw_us = t.elapsed().as_micros() as u64;
         let filtered: Vec<SearchHit> = hits
             .into_iter()
             .filter(|h| h.entry.matches_filter(filter))
             .take(top_k)
             .collect();
         if !filtered.is_empty() {
+            breakdown.finalize();
             return Ok(filtered);
         }
     }
+    breakdown.finalize();
     Ok(Vec::new())
 }
 
@@ -560,7 +591,13 @@ fn load_metadata_sidecar(
 /// `over_fetch` must be ≥ 1. A typical value is 10 — the reranker only sees
 /// candidates HNSW already surfaced, so a larger fan-out gives the cross-encoder
 /// more room to reorder at the cost of additional cross-encoder calls.
+/// Dense-only retrieval + cross-encoder reranking.
+///
+/// `breakdown` is populated with embed + HNSW + rerank timing.
+/// `bm25_us` and `fuse_us` are left at zero (no BM25 on this path).
+/// Pass `&mut LatencyBreakdown::default()` if you don't need the breakdown.
 #[cfg(feature = "rerank")]
+#[allow(clippy::too_many_arguments)]
 pub fn query_corpus_reranked(
     corpus_dir: &Path,
     query: &str,
@@ -569,13 +606,24 @@ pub fn query_corpus_reranked(
     embedder: &dyn DynEmbedderTrait,
     reranker: &dyn fastrag_rerank::Reranker,
     filter: &std::collections::BTreeMap<String, String>,
+    breakdown: &mut LatencyBreakdown,
 ) -> Result<Vec<SearchHit>, CorpusError> {
+    use std::time::Instant;
+
     let fan_out = top_k.saturating_mul(over_fetch.max(1)).max(top_k);
-    let first_stage = query_corpus_with_filter(corpus_dir, query, fan_out, embedder, filter)?;
+    let first_stage =
+        query_corpus_with_filter(corpus_dir, query, fan_out, embedder, filter, breakdown)?;
+
+    let t = Instant::now();
     let mut reranked = reranker
         .rerank(query, first_stage)
         .map_err(|e| CorpusError::Rerank(e.to_string()))?;
+    breakdown.rerank_us = t.elapsed().as_micros() as u64;
+
     reranked.truncate(top_k);
+    // Re-finalize: query_corpus_with_filter already called finalize() which set
+    // total_us without rerank_us. We overwrite here to include it.
+    breakdown.finalize();
     Ok(reranked)
 }
 
@@ -1010,8 +1058,14 @@ mod tests {
         assert_eq!(stats.files_indexed, 2);
         assert_eq!(stats.chunk_count, 2);
 
-        let hits =
-            query_corpus(corpus.path(), "alpha beta gamma delta.", 1, &MockEmbedder).unwrap();
+        let hits = query_corpus(
+            corpus.path(),
+            "alpha beta gamma delta.",
+            1,
+            &MockEmbedder,
+            &mut LatencyBreakdown::default(),
+        )
+        .unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].entry.source_path.file_name().unwrap(), "alpha.txt");
 
@@ -1056,14 +1110,27 @@ mod tests {
         )
         .unwrap();
 
-        let unfiltered = query_corpus(corpus.path(), "beta gamma delta", 5, &MockEmbedder).unwrap();
+        let unfiltered = query_corpus(
+            corpus.path(),
+            "beta gamma delta",
+            5,
+            &MockEmbedder,
+            &mut LatencyBreakdown::default(),
+        )
+        .unwrap();
         assert_eq!(unfiltered.len(), 2);
 
         let mut f = std::collections::BTreeMap::new();
         f.insert("customer".to_string(), "acme".to_string());
-        let hits =
-            query_corpus_with_filter(corpus.path(), "beta gamma delta", 5, &MockEmbedder, &f)
-                .unwrap();
+        let hits = query_corpus_with_filter(
+            corpus.path(),
+            "beta gamma delta",
+            5,
+            &MockEmbedder,
+            &f,
+            &mut LatencyBreakdown::default(),
+        )
+        .unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].entry.source_path.file_name().unwrap(), "alpha.txt");
         assert_eq!(
@@ -1073,17 +1140,29 @@ mod tests {
 
         let mut f = std::collections::BTreeMap::new();
         f.insert("customer".to_string(), "base".to_string());
-        let hits =
-            query_corpus_with_filter(corpus.path(), "beta gamma delta", 5, &MockEmbedder, &f)
-                .unwrap();
+        let hits = query_corpus_with_filter(
+            corpus.path(),
+            "beta gamma delta",
+            5,
+            &MockEmbedder,
+            &f,
+            &mut LatencyBreakdown::default(),
+        )
+        .unwrap();
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].entry.source_path.file_name().unwrap(), "beta.txt");
 
         let mut f = std::collections::BTreeMap::new();
         f.insert("customer".to_string(), "nobody".to_string());
-        let hits =
-            query_corpus_with_filter(corpus.path(), "beta gamma delta", 5, &MockEmbedder, &f)
-                .unwrap();
+        let hits = query_corpus_with_filter(
+            corpus.path(),
+            "beta gamma delta",
+            5,
+            &MockEmbedder,
+            &f,
+            &mut LatencyBreakdown::default(),
+        )
+        .unwrap();
         assert!(hits.is_empty());
     }
 

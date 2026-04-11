@@ -200,6 +200,7 @@ fn dense_only_fallback_works() {
         5,
         &embedder as &dyn DynEmbedderTrait,
         &filter,
+        &mut fastrag::corpus::LatencyBreakdown::default(),
     )
     .unwrap();
 
@@ -299,4 +300,92 @@ async fn http_dense_only_server_flag() {
     );
 
     server.abort();
+}
+
+#[test]
+fn latency_breakdown_threaded_through_query_corpus() {
+    let dir = tempdir().unwrap();
+    build_test_corpus(dir.path());
+
+    let embedder = MockEmbedder;
+    let mut breakdown = fastrag::corpus::LatencyBreakdown::default();
+    let hits = ops::query_corpus(
+        dir.path(),
+        "Rust programming",
+        5,
+        &embedder as &dyn DynEmbedderTrait,
+        &mut breakdown,
+    )
+    .unwrap();
+
+    assert!(!hits.is_empty());
+    assert!(breakdown.embed_us > 0, "embed_us should be non-zero");
+    assert!(breakdown.hnsw_us > 0, "hnsw_us should be non-zero");
+    assert_eq!(
+        breakdown.bm25_us, 0,
+        "dense-only path should not set bm25_us"
+    );
+    assert_eq!(
+        breakdown.fuse_us, 0,
+        "dense-only path should not set fuse_us"
+    );
+    assert_eq!(
+        breakdown.rerank_us, 0,
+        "no reranker — rerank_us should be 0"
+    );
+    assert_eq!(
+        breakdown.total_us,
+        breakdown.embed_us
+            + breakdown.bm25_us
+            + breakdown.hnsw_us
+            + breakdown.rerank_us
+            + breakdown.fuse_us,
+        "total_us must equal sum of per-stage fields"
+    );
+    assert!(breakdown.total_us > 0, "total_us should be non-zero");
+}
+
+#[test]
+fn latency_breakdown_threaded_through_query_corpus_with_filter() {
+    let dir = tempdir().unwrap();
+    build_test_corpus(dir.path());
+
+    let embedder = MockEmbedder;
+    let filter = BTreeMap::new();
+    let mut breakdown = fastrag::corpus::LatencyBreakdown::default();
+    let hits = ops::query_corpus_with_filter(
+        dir.path(),
+        "Rust programming",
+        5,
+        &embedder as &dyn DynEmbedderTrait,
+        &filter,
+        &mut breakdown,
+    )
+    .unwrap();
+
+    assert!(!hits.is_empty());
+    assert!(breakdown.embed_us > 0, "embed_us should be non-zero");
+    assert!(breakdown.hnsw_us > 0, "hnsw_us should be non-zero");
+    assert_eq!(
+        breakdown.bm25_us, 0,
+        "dense-only path should not set bm25_us"
+    );
+    assert_eq!(
+        breakdown.fuse_us, 0,
+        "dense-only path should not set fuse_us"
+    );
+    assert_eq!(
+        breakdown.rerank_us, 0,
+        "no reranker — rerank_us should be 0"
+    );
+    assert_eq!(
+        breakdown.total_us,
+        breakdown.embed_us
+            + breakdown.bm25_us
+            + breakdown.hnsw_us
+            + breakdown.rerank_us
+            + breakdown.fuse_us,
+        "total_us must equal sum of per-stage fields"
+    );
+    assert!(breakdown.total_us > 0, "total_us should be non-zero");
 }

@@ -306,6 +306,7 @@ impl FastRagMcpServer {
                     top_k,
                     embedder.as_ref(),
                     &filter,
+                    &mut fastrag::corpus::LatencyBreakdown::default(),
                 )
             })
             .await

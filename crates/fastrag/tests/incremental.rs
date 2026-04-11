@@ -1,5 +1,5 @@
 use fastrag::ChunkingStrategy;
-use fastrag::corpus::{CorpusIndexStats, index_path, query_corpus};
+use fastrag::corpus::{CorpusIndexStats, LatencyBreakdown, index_path, query_corpus};
 use fastrag_embed::test_utils::MockEmbedder;
 use std::fs;
 use tempfile::tempdir;
@@ -52,7 +52,14 @@ fn edited_file_is_re_embedded_stale_chunks_gone() {
     assert!(stats.chunks_removed >= 1);
     assert!(stats.chunks_added >= 1);
 
-    let hits = query_corpus(corpus.path(), "original content", 5, &MockEmbedder).unwrap();
+    let hits = query_corpus(
+        corpus.path(),
+        "original content",
+        5,
+        &MockEmbedder,
+        &mut LatencyBreakdown::default(),
+    )
+    .unwrap();
     assert!(
         hits.iter()
             .all(|h| !h.entry.chunk_text.contains("original"))
@@ -72,7 +79,14 @@ fn deleted_file_drops_chunks() {
     assert_eq!(stats.files_deleted, 1);
     assert!(stats.chunks_removed >= 1);
 
-    let hits = query_corpus(corpus.path(), "beta", 5, &MockEmbedder).unwrap();
+    let hits = query_corpus(
+        corpus.path(),
+        "beta",
+        5,
+        &MockEmbedder,
+        &mut LatencyBreakdown::default(),
+    )
+    .unwrap();
     assert!(hits.iter().all(|h| !h.entry.source_path.ends_with("b.txt")));
 }
 
@@ -87,15 +101,36 @@ fn two_roots_isolated() {
     reindex(a.path(), corpus.path());
     reindex(b.path(), corpus.path());
 
-    let hits = query_corpus(corpus.path(), "alpha", 5, &MockEmbedder).unwrap();
+    let hits = query_corpus(
+        corpus.path(),
+        "alpha",
+        5,
+        &MockEmbedder,
+        &mut LatencyBreakdown::default(),
+    )
+    .unwrap();
     assert!(hits.iter().any(|h| h.entry.source_path.ends_with("a.txt")));
-    let hits = query_corpus(corpus.path(), "beta", 5, &MockEmbedder).unwrap();
+    let hits = query_corpus(
+        corpus.path(),
+        "beta",
+        5,
+        &MockEmbedder,
+        &mut LatencyBreakdown::default(),
+    )
+    .unwrap();
     assert!(hits.iter().any(|h| h.entry.source_path.ends_with("b.txt")));
 
     fs::remove_file(a.path().join("a.txt")).unwrap();
     let stats = reindex(a.path(), corpus.path());
     assert_eq!(stats.files_deleted, 1);
 
-    let hits = query_corpus(corpus.path(), "beta", 5, &MockEmbedder).unwrap();
+    let hits = query_corpus(
+        corpus.path(),
+        "beta",
+        5,
+        &MockEmbedder,
+        &mut LatencyBreakdown::default(),
+    )
+    .unwrap();
     assert!(hits.iter().any(|h| h.entry.source_path.ends_with("b.txt")));
 }
