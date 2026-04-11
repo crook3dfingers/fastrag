@@ -1,0 +1,131 @@
+name: Weekly (eval harness)
+
+on:
+  schedule:
+    - cron: "0 6 * * 0"   # Sundays 06:00 UTC
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check-changes:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    outputs:
+      has_changes: ${{ github.event_name == 'workflow_dispatch' || steps.check.outputs.has_changes }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check for commits in last 7 days
+        id: check
+        run: |
+          if git log --since="7 days ago" --oneline | grep -q .; then
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            echo "No commits in last 7 days — skipping weekly eval."
+          fi
+
+  eval:
+    needs: check-changes
+    if: needs.check-changes.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      FASTRAG_LLAMA_TEST: "1"
+      FASTRAG_RERANK_TEST: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: eval-weekly
+
+      - name: Install llama-server
+        run: |
+          LLAMA_TAG="b8739"
+          curl -fsSL "https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_TAG}/llama-${LLAMA_TAG}-bin-ubuntu-x64.tar.gz" -o llama.tar.gz
+          tar xzf llama.tar.gz
+          sudo mkdir -p /opt/llama
+          sudo cp -a llama-${LLAMA_TAG}/* /opt/llama/
+          sudo ln -sf /opt/llama/llama-server /usr/local/bin/llama-server
+          echo "LD_LIBRARY_PATH=/opt/llama" >> "$GITHUB_ENV"
+          llama-server --version
+
+      - name: Cache GGUF models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/fastrag/models
+          key: gguf-qwen3-embed-600m-q8-qwen3-4b-instruct-2507-q4km
+
+      - name: Download embedder GGUF
+        run: |
+          MODEL_DIR="$HOME/.cache/fastrag/models"
+          MODEL_FILE="Qwen3-Embedding-0.6B-Q8_0.gguf"
+          if [ ! -f "$MODEL_DIR/$MODEL_FILE" ]; then
+            mkdir -p "$MODEL_DIR"
+            curl -fsSL "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/$MODEL_FILE" -o "$MODEL_DIR/$MODEL_FILE"
+          fi
+
+      - name: Download completion GGUF
+        run: |
+          MODEL_DIR="$HOME/.cache/fastrag/models"
+          MODEL_FILE="Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
+          if [ ! -f "$MODEL_DIR/$MODEL_FILE" ]; then
+            mkdir -p "$MODEL_DIR"
+            curl -fsSL "https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF/resolve/main/$MODEL_FILE" -o "$MODEL_DIR/$MODEL_FILE"
+          fi
+
+      - name: Cache ONNX reranker
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/fastrag/models/gte-reranker-modernbert-base
+          key: onnx-gte-reranker-modernbert-base
+
+      - name: Download ONNX reranker
+        run: |
+          MODEL_DIR="$HOME/.cache/fastrag/models/gte-reranker-modernbert-base"
+          if [ ! -f "$MODEL_DIR/model.onnx" ] || [ ! -f "$MODEL_DIR/tokenizer.json" ]; then
+            mkdir -p "$MODEL_DIR"
+            curl -fsSL "https://huggingface.co/Alibaba-NLP/gte-reranker-modernbert-base/resolve/main/onnx/model.onnx" -o "$MODEL_DIR/model.onnx"
+            curl -fsSL "https://huggingface.co/Alibaba-NLP/gte-reranker-modernbert-base/resolve/main/tokenizer.json" -o "$MODEL_DIR/tokenizer.json"
+          fi
+
+      - name: Build contextualized corpus
+        run: |
+          cargo run --release \
+            --features retrieval,rerank,hybrid,contextual,contextual-llama -- \
+            index tests/gold/corpus \
+            --corpus "$RUNNER_TEMP/corpus-ctx" \
+            --embedder qwen3-q8 \
+            --contextualize
+
+      - name: Build raw corpus
+        run: |
+          cargo run --release \
+            --features retrieval,rerank,hybrid,contextual,contextual-llama -- \
+            index tests/gold/corpus \
+            --corpus "$RUNNER_TEMP/corpus-raw" \
+            --embedder qwen3-q8
+
+      - name: Run eval matrix
+        id: run_eval
+        run: |
+          cargo run --release \
+            --features eval,retrieval,rerank,hybrid,contextual,contextual-llama -- \
+            eval \
+            --gold-set tests/gold/questions.json \
+            --corpus "$RUNNER_TEMP/corpus-ctx" \
+            --corpus-no-contextual "$RUNNER_TEMP/corpus-raw" \
+            --config-matrix \
+            --baseline docs/eval-baselines/current.json \
+            --report "$RUNNER_TEMP/matrix.json"
+
+      - name: Upload matrix report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-weekly-report
+          path: ${{ runner.temp }}/matrix.json
