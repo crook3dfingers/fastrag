@@ -48,6 +48,9 @@ pub struct LlamaServerHandle {
     base_url: String,
     http: reqwest::blocking::Client,
     port: u16,
+    /// The config used to spawn this handle, retained so [`LlamaServerHandle::restart`]
+    /// can re-invoke [`LlamaServerHandle::spawn`] after a subprocess crash.
+    cfg: LlamaServerConfig,
 }
 
 impl LlamaServerHandle {
@@ -126,6 +129,7 @@ impl LlamaServerHandle {
             base_url,
             http,
             port: cfg.port,
+            cfg,
         })
     }
 
@@ -143,6 +147,32 @@ impl LlamaServerHandle {
 
     pub fn port(&self) -> u16 {
         self.port
+    }
+
+    /// Non-blocking aliveness probe.
+    ///
+    /// Returns `false` once the child subprocess has exited for any reason.
+    /// A `true` return guarantees the subprocess was alive at the instant of
+    /// the call; it does not guarantee it is still alive afterwards.
+    pub fn check_alive(&mut self) -> bool {
+        match self.child.try_wait() {
+            Ok(None) => true,           // still running
+            Ok(Some(_status)) => false, // exited
+            Err(_) => false,            // treat probe errors as dead
+        }
+    }
+
+    /// Re-spawn the `llama-server` subprocess using the original config.
+    ///
+    /// Intended to be called after [`LlamaServerHandle::check_alive`] reports
+    /// false. Calling it while the subprocess is still healthy will first tear
+    /// down the running process (via the old child's `Drop`) and then spawn a
+    /// replacement on the same port with the same GGUF.
+    pub fn restart(&mut self) -> Result<(), EmbedError> {
+        let cfg = self.cfg.clone();
+        let new_handle = Self::spawn(cfg)?;
+        *self = new_handle;
+        Ok(())
     }
 }
 
@@ -246,5 +276,68 @@ mod tests {
     fn parse_bare_number_after_version_colon() {
         // Newer llama.cpp releases (b8739+) output "version: 8739 (hash)" without the 'b' prefix.
         assert_eq!(parse_build_number("version: 8739 (d132f22fc)"), Some(8739));
+    }
+
+    /// Build a handle wrapping an arbitrary `Child`, bypassing the real spawn
+    /// path. Test-only; callers must ensure the provided `cfg` is cloneable if
+    /// they intend to exercise `restart()`.
+    fn test_handle_wrapping(child: Child, cfg: LlamaServerConfig) -> LlamaServerHandle {
+        let base_url = format!("http://127.0.0.1:{}", cfg.port);
+        let http = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_millis(500))
+            .build()
+            .expect("reqwest client");
+        let port = cfg.port;
+        LlamaServerHandle {
+            child,
+            base_url,
+            http,
+            port,
+            cfg,
+        }
+    }
+
+    #[test]
+    fn check_alive_reports_dead_after_kill() {
+        // Spawn a dummy long-running process to stand in for llama-server. We
+        // only exercise the `try_wait`-based aliveness probe, so any child
+        // that stays up for the duration of the test works.
+        let child = Command::new("sleep")
+            .arg("60")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn sleep");
+        let cfg = LlamaServerConfig {
+            binary_path: PathBuf::from("/bin/sleep"),
+            port: 0,
+            health_timeout: Duration::from_secs(1),
+            extra_args: Vec::new(),
+            skip_version_check: true,
+        };
+        let mut handle = test_handle_wrapping(child, cfg);
+
+        assert!(handle.check_alive(), "newly spawned handle should be alive");
+
+        let pid = handle.pid();
+        #[cfg(unix)]
+        {
+            use nix::sys::signal::{Signal, kill};
+            use nix::unistd::Pid;
+            kill(Pid::from_raw(pid as i32), Signal::SIGKILL).expect("kill");
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = pid;
+            unimplemented!("test is unix-only");
+        }
+
+        // Let the kernel reap the exit.
+        thread::sleep(Duration::from_millis(300));
+
+        assert!(
+            !handle.check_alive(),
+            "handle should report dead after SIGKILL"
+        );
     }
 }
