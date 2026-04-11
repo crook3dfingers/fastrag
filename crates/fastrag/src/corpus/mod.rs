@@ -1100,11 +1100,11 @@ mod tests {
             bm25_us: 200,
             hnsw_us: 300,
             rerank_us: 400,
-            fuse_us: 50,
+            fuse_us: 500,
             ..Default::default()
         };
         b.finalize();
-        assert_eq!(b.total_us, 1050);
+        assert_eq!(b.total_us, 1500);
     }
 }
 
