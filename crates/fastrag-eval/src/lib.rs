@@ -1,3 +1,4 @@
+pub mod baseline;
 mod dataset;
 pub mod datasets;
 mod error;

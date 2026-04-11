@@ -56,6 +56,19 @@ pub enum EvalError {
     MatrixRequiresGoldSet,
     #[error("--config-matrix requires --corpus-no-contextual")]
     MatrixMissingRawCorpus,
+    #[error("baseline load error at {path}: {source}")]
+    BaselineLoad {
+        path: std::path::PathBuf,
+        #[source]
+        source: serde_json::Error,
+    },
+    #[error("baseline schema mismatch: baseline version {baseline_version}, report version {report_version}")]
+    BaselineSchemaMismatch {
+        baseline_version: u32,
+        report_version: u32,
+    },
+    #[error("baseline references variant {0:?} but report does not contain it")]
+    BaselineVariantMissing(crate::matrix::ConfigVariant),
 }
 
 pub type EvalResult<T> = Result<T, EvalError>;
