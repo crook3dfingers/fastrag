@@ -1,5 +1,7 @@
 pub mod args;
 
+#[cfg(feature = "contextual")]
+pub mod context_loader;
 #[cfg(feature = "retrieval")]
 pub mod embed_loader;
 #[cfg(feature = "retrieval")]

@@ -10,6 +10,8 @@ use fastrag::ops::{self, collect_files, output_path, render_document};
 use fastrag::registry::ParserRegistry;
 use fastrag::{ChunkingStrategy, DynEmbedderTrait, OutputFormat};
 use fastrag_cli::args::{self, ChunkStrategyArg, Cli, Command, OutputFormatArg};
+#[cfg(feature = "contextual")]
+use fastrag_cli::context_loader::load_context_state;
 use fastrag_cli::embed_loader;
 use indicatif::{ProgressBar, ProgressStyle};
 use tokio::sync::Semaphore;
@@ -144,7 +146,30 @@ async fn main() {
             ollama_model,
             ollama_url,
             metadata,
+            #[cfg(feature = "contextual")]
+            contextualize,
+            #[cfg(feature = "contextual")]
+            context_model,
+            #[cfg(feature = "contextual")]
+            context_strict,
+            #[cfg(feature = "contextual")]
+            retry_failed,
         } => {
+            #[cfg(feature = "contextual")]
+            {
+                if let Some(preset) = context_model.as_deref()
+                    && preset != "default"
+                {
+                    eprintln!(
+                        "Error: --context-model currently only supports `default`, got `{preset}`"
+                    );
+                    std::process::exit(2);
+                }
+                if retry_failed && !contextualize {
+                    eprintln!("Error: --retry-failed requires --contextualize");
+                    std::process::exit(2);
+                }
+            }
             tokio::task::block_in_place(|| {
                 let chunking = chunking_from_args(
                     chunk_strategy,
@@ -168,6 +193,59 @@ async fn main() {
                 });
                 let base_metadata: std::collections::BTreeMap<String, String> =
                     metadata.into_iter().collect();
+
+                #[cfg(feature = "contextual")]
+                let mut context_state = if contextualize {
+                    match load_context_state(&corpus) {
+                        Ok(s) => Some(s),
+                        Err(e) => {
+                            eprintln!("Error starting contextualizer: {e}");
+                            std::process::exit(1);
+                        }
+                    }
+                } else {
+                    None
+                };
+
+                #[cfg(feature = "contextual")]
+                if retry_failed {
+                    let state = context_state
+                        .as_mut()
+                        .expect("retry_failed requires contextualize");
+                    let opts_for_retry = fastrag::corpus::ContextualizeOptions {
+                        contextualizer: &*state.contextualizer,
+                        cache: &mut state.cache,
+                        strict: context_strict,
+                    };
+                    match fastrag::corpus::retry_failed_contextualizations(
+                        &corpus,
+                        opts_for_retry,
+                        embedder.as_ref() as &dyn DynEmbedderTrait,
+                    ) {
+                        Ok(report) => {
+                            println!(
+                                "Repaired {}/{} failed chunks (rebuilt dense index: {})",
+                                report.repaired, report.total_failed, report.rebuilt_dense,
+                            );
+                            return;
+                        }
+                        Err(e) => {
+                            eprintln!("Error retrying failed contextualizations: {e}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
+
+                #[cfg(feature = "contextual")]
+                let contextualize_opts =
+                    context_state
+                        .as_mut()
+                        .map(|s| fastrag::corpus::ContextualizeOptions {
+                            contextualizer: &*s.contextualizer,
+                            cache: &mut s.cache,
+                            strict: context_strict,
+                        });
+
                 match ops::index_path_with_metadata(
                     &input,
                     &corpus,
@@ -175,7 +253,7 @@ async fn main() {
                     embedder.as_ref() as &dyn DynEmbedderTrait,
                     &base_metadata,
                     #[cfg(feature = "contextual")]
-                    None,
+                    contextualize_opts,
                 ) {
                     Ok(stats) => {
                         println!("{}", serde_json::to_string_pretty(&stats).unwrap());
@@ -189,6 +267,19 @@ async fn main() {
                             stats.chunks_added,
                             stats.chunks_removed,
                         );
+                        #[cfg(feature = "contextual")]
+                        if contextualize {
+                            println!(
+                                "Contextualized: {} ok / {} fallback",
+                                stats.chunks_contextualized, stats.chunks_contextualize_fallback,
+                            );
+                        } else {
+                            eprintln!();
+                            eprintln!(
+                                "Hint: re-run with --contextualize for better retrieval on technical"
+                            );
+                            eprintln!("      queries (one-time per corpus, cached thereafter).");
+                        }
                     }
                     Err(e) => {
                         eprintln!("Error indexing {}: {e}", input.display());
@@ -354,7 +445,11 @@ async fn main() {
                     std::process::exit(1);
                 });
                 match ops::corpus_info(&corpus, emb.as_ref() as &dyn DynEmbedderTrait) {
-                    Ok(info) => println!("{}", serde_json::to_string_pretty(&info).unwrap()),
+                    Ok(info) => {
+                        println!("{}", serde_json::to_string_pretty(&info).unwrap());
+                        #[cfg(feature = "contextual")]
+                        print_contextualizer_info(&corpus, &info);
+                    }
                     Err(e) => {
                         eprintln!("Error reading corpus {}: {e}", corpus.display());
                         std::process::exit(1);
@@ -492,6 +587,33 @@ fn chunking_from_args(
             similarity_threshold,
             percentile_threshold,
         },
+    }
+}
+
+#[cfg(feature = "contextual")]
+fn print_contextualizer_info(corpus: &Path, info: &fastrag::corpus::CorpusInfo) {
+    eprintln!();
+    match info.manifest.contextualizer.as_ref() {
+        Some(c) => {
+            eprintln!("contextualized: true");
+            eprintln!("  model_id:       {}", c.model_id);
+            eprintln!("  prompt_version: {}", c.prompt_version);
+            eprintln!("  prompt_hash:    {}", c.prompt_hash);
+            let cache_path = corpus.join("contextualization.sqlite");
+            if cache_path.exists() {
+                match fastrag_context::ContextCache::open(&cache_path).and_then(|c| c.row_count()) {
+                    Ok((ok, failed)) => {
+                        eprintln!("  cached:         {ok} ok / {failed} failed");
+                    }
+                    Err(e) => {
+                        eprintln!("  cached:         ERROR — {e}");
+                    }
+                }
+            }
+        }
+        None => {
+            eprintln!("contextualized: false");
+        }
     }
 }
 

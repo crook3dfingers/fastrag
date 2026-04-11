@@ -37,6 +37,16 @@ pub struct ContextualizeStats {
     pub fallback: usize,
 }
 
+/// Result of a `--retry-failed` pass: how many failed rows we found, how many
+/// we repaired, and whether the dense HNSW index was rebuilt from the cache.
+#[cfg(feature = "contextual")]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct RetryReport {
+    pub total_failed: usize,
+    pub repaired: usize,
+    pub rebuilt_dense: bool,
+}
+
 #[derive(Debug, Error)]
 pub enum CorpusError {
     #[error("I/O error: {0}")]
@@ -599,6 +609,95 @@ pub fn query_corpus_hybrid_reranked(
         .map_err(|e| CorpusError::Rerank(e.to_string()))?;
     reranked.truncate(top_k);
     Ok(reranked)
+}
+
+/// Re-run contextualization for every `status='failed'` row in the corpus's
+/// SQLite cache. Does not re-parse any source documents — the failed rows
+/// carry the raw chunk text and doc title, which is enough to re-prompt the
+/// contextualizer.
+///
+/// On success, if **any** row was repaired, the dense HNSW index is rebuilt
+/// from scratch by reading every `status='ok'` row from the cache and
+/// re-embedding the contextualized text. Tantivy bodies for repaired rows
+/// are rewritten in place. See `rebuild_dense_from_cache` for the details.
+///
+/// Rows that still fail stay `status='failed'` — the existing error message
+/// is preserved on failure, not overwritten.
+#[cfg(feature = "contextual")]
+pub fn retry_failed_contextualizations(
+    corpus_dir: &Path,
+    opts: ContextualizeOptions<'_>,
+    embedder: &dyn DynEmbedderTrait,
+) -> Result<RetryReport, CorpusError> {
+    use fastrag_context::CacheKey;
+
+    let failed: Vec<fastrag_context::CachedContext> = opts
+        .cache
+        .iter_failed()
+        .map_err(|e| CorpusError::Embed(format!("cache iter_failed: {e}")))?
+        .collect();
+    let total_failed = failed.len();
+    let mut repaired = 0usize;
+
+    for row in failed {
+        let key = CacheKey {
+            chunk_hash: row.chunk_hash,
+            ctx_version: row.ctx_version,
+            model_id: &row.model_id,
+            prompt_version: row.prompt_version,
+        };
+        match opts
+            .contextualizer
+            .contextualize(&row.doc_title, &row.raw_text)
+        {
+            Ok(ctx_text) => {
+                opts.cache
+                    .put_ok(key, &row.raw_text, &row.doc_title, &ctx_text)
+                    .map_err(|e| CorpusError::Embed(format!("cache put_ok: {e}")))?;
+                repaired += 1;
+            }
+            Err(e) => {
+                if opts.strict {
+                    return Err(CorpusError::Embed(format!("retry-failed strict: {e}")));
+                }
+                // Leave row as `failed` with its original error intact.
+            }
+        }
+    }
+
+    if repaired == 0 {
+        return Ok(RetryReport {
+            total_failed,
+            repaired,
+            rebuilt_dense: false,
+        });
+    }
+
+    rebuild_dense_from_cache(corpus_dir, opts.cache, embedder)?;
+
+    Ok(RetryReport {
+        total_failed,
+        repaired,
+        rebuilt_dense: true,
+    })
+}
+
+/// Rebuild the dense HNSW index from the SQLite cache. Consumed by
+/// [`retry_failed_contextualizations`] when any retry succeeds.
+///
+/// The implementation is deferred to Phase 6 alongside the E2E test that
+/// exercises it. Until then, calling this path will panic via `todo!()`.
+#[cfg(feature = "contextual")]
+fn rebuild_dense_from_cache(
+    _corpus_dir: &Path,
+    _cache: &fastrag_context::ContextCache,
+    _embedder: &dyn DynEmbedderTrait,
+) -> Result<(), CorpusError> {
+    // Phase 6 Task 6.2 implements this; the E2E test in
+    // `fastrag-cli/tests/contextual_retry_failed_e2e.rs` drives the
+    // implementation. Until that lands, the retry path is non-functional
+    // when any row was actually repaired.
+    todo!("rebuild_dense_from_cache — implement in Phase 6 Task 6.2 alongside the E2E test")
 }
 
 pub fn corpus_info(

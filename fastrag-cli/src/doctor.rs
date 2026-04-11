@@ -61,4 +61,26 @@ pub fn run() {
             }
         );
     }
+
+    // 5. Contextualizer (only when contextual-llama is compiled in)
+    #[cfg(feature = "contextual-llama")]
+    check_contextualizer();
+}
+
+#[cfg(feature = "contextual-llama")]
+fn check_contextualizer() {
+    use fastrag_embed::llama_cpp::{
+        DefaultCompletionPreset, HfHubDownloader, resolve_model_path_default,
+    };
+
+    println!();
+    println!("contextualizer:");
+    println!("  preset:    {}", DefaultCompletionPreset::MODEL_ID);
+    println!("  hf_repo:   {}", DefaultCompletionPreset::HF_REPO);
+    println!("  gguf_file: {}", DefaultCompletionPreset::GGUF_FILE);
+    println!("  ctx_size:  {}", DefaultCompletionPreset::CONTEXT_WINDOW);
+    match resolve_model_path_default(&DefaultCompletionPreset::model_source(), &HfHubDownloader) {
+        Ok(p) => println!("  resolved:  {}", p.display()),
+        Err(e) => println!("  resolved:  ERROR — {e}"),
+    }
 }

@@ -176,6 +176,35 @@ pub enum Command {
         /// Per-file `.meta.json` sidecars override these on conflict.
         #[arg(long = "metadata", value_parser = parse_kv)]
         metadata: Vec<(String, String)>,
+
+        /// Opt in to Contextual Retrieval at ingest time. Runs a small
+        /// instruct LLM over each chunk to generate a 50–100 token prefix
+        /// that situates the chunk in its source document; the prefix is
+        /// cached per-corpus in `contextualization.sqlite` and reused on
+        /// incremental re-index.
+        #[cfg(feature = "contextual")]
+        #[arg(long)]
+        contextualize: bool,
+
+        /// Override the completion model preset used by `--contextualize`.
+        /// Accepts a preset name; currently only `default` is supported.
+        #[cfg(feature = "contextual")]
+        #[arg(long)]
+        context_model: Option<String>,
+
+        /// Hard-fail the ingest on any per-chunk contextualization error.
+        /// Without this flag, failing chunks fall back to raw text and the
+        /// ingest continues.
+        #[cfg(feature = "contextual")]
+        #[arg(long)]
+        context_strict: bool,
+
+        /// Re-run contextualization only for chunks whose cached row is
+        /// `failed`. Requires a corpus already ingested with
+        /// `--contextualize`. Does not re-parse source documents.
+        #[cfg(feature = "contextual")]
+        #[arg(long)]
+        retry_failed: bool,
     },
 
     /// Query an indexed corpus
