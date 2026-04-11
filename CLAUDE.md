@@ -26,6 +26,15 @@ FASTRAG_LLAMA_TEST=1 cargo test -p fastrag-cli --features contextual,contextual-
 FASTRAG_LLAMA_TEST=1 cargo test -p fastrag-cli --features contextual,contextual-llama --test contextual_retry_failed_e2e -- --ignored
 FASTRAG_LLAMA_TEST=1 cargo test -p fastrag-cli --features contextual,contextual-llama --test contextual_strict_e2e -- --ignored
 cargo clippy --workspace --all-targets --features retrieval,rerank,hybrid,contextual -- -D warnings  # Full lint gate (with contextual)
+cargo test --workspace --features eval                                        # Eval harness unit tests
+cargo test -p fastrag-eval --features real-driver                             # Real-driver build (needed by CLI)
+cargo test -p fastrag-eval --test matrix_stub                                 # Matrix orchestrator stub test
+cargo test -p fastrag-eval --test gold_set_loader                             # Gold set loader validation branches
+cargo test -p fastrag-eval --test union_match                                 # Union-of-top-k scorer
+cargo test -p fastrag-eval --test baseline_diff                               # Baseline diff + slack gate
+FASTRAG_LLAMA_TEST=1 FASTRAG_RERANK_TEST=1 cargo test -p fastrag-cli --features eval,contextual,contextual-llama,retrieval,rerank,hybrid --test eval_matrix_e2e -- --ignored
+cargo test -p fastrag-cli --features eval --test eval_gold_set_rejects_invalid_e2e
+cargo clippy --workspace --all-targets --features retrieval,rerank,hybrid,contextual,eval -- -D warnings  # Full lint gate with eval
 cargo fmt --check            # Format check
 cargo build --release        # Release build (binary at target/release/fastrag)
 ```
@@ -67,6 +76,12 @@ cargo run -- index --corpus ./corpus --contextualize --retry-failed
 cargo run -- query "invoice payment terms" --corpus ./corpus --top-k 5
 cargo run -- corpus-info --corpus ./corpus  # Shows contextualized: true or false
 cargo run -- serve-http --corpus ./corpus --port 8081
+cargo run -- eval --gold-set tests/gold/questions.json \
+                  --corpus ./corpus-ctx \
+                  --corpus-no-contextual ./corpus-raw \
+                  --config-matrix \
+                  --baseline docs/eval-baselines/current.json \
+                  --report target/eval/matrix.json
 ```
 
 The retrieval path uses `fastrag-embed` for embeddings and `fastrag-index` for persistence (`manifest.json`, `index.bin`, `entries.bin`).
