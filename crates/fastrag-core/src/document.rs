@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use serde::{Deserialize, Serialize};
 
@@ -20,6 +20,11 @@ pub struct Metadata {
     pub author: Option<String>,
     pub page_count: Option<usize>,
     pub created_at: Option<String>,
+    /// Flat ingest metadata map. Used by structured parsers (e.g. NVD) to
+    /// carry per-record fields (cve_id, vuln_status, etc.) without polluting
+    /// the top-level struct with format-specific fields.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub extra: BTreeMap<String, String>,
     #[serde(flatten)]
     pub custom: HashMap<String, String>,
 }
@@ -33,6 +38,7 @@ impl Metadata {
             author: None,
             page_count: None,
             created_at: None,
+            extra: BTreeMap::new(),
             custom: HashMap::new(),
         }
     }
@@ -544,6 +550,33 @@ mod tests {
         assert_eq!(m.page_count, None);
         assert_eq!(m.created_at, None);
         assert!(m.custom.is_empty());
+        assert!(m.extra.is_empty());
+    }
+
+    #[test]
+    fn metadata_extra_not_serialized_when_empty() {
+        let m = Metadata::new(FileFormat::Html);
+        let json = serde_json::to_string(&m).unwrap();
+        assert!(
+            !json.contains("extra"),
+            "empty extra must not appear in JSON: {json}"
+        );
+    }
+
+    #[test]
+    fn metadata_extra_serialized_when_populated() {
+        let mut m = Metadata::new(FileFormat::NvdFeed);
+        m.extra
+            .insert("cve_id".to_string(), "CVE-2024-1234".to_string());
+        let json = serde_json::to_string(&m).unwrap();
+        assert!(
+            json.contains("\"extra\""),
+            "populated extra must appear in JSON: {json}"
+        );
+        assert!(
+            json.contains("CVE-2024-1234"),
+            "cve_id value must be present: {json}"
+        );
     }
 
     // --- BoundingBox tests ---

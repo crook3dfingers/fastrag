@@ -15,6 +15,16 @@ pub use error::FastRagError;
 pub use format::{FileFormat, SourceInfo};
 pub use output::OutputFormat;
 
+/// A parser that emits multiple `Document` objects from a single source file.
+///
+/// Used for formats like NVD JSON feeds where one file encodes many
+/// independent records. Implement this trait alongside (not instead of)
+/// `Parser` when a format requires multi-doc emission.
+pub trait MultiDocParser: Send + Sync {
+    /// Parse the file at `path` and return one `Document` per logical record.
+    fn parse_all(&self, path: &std::path::Path) -> Result<Vec<Document>, FastRagError>;
+}
+
 /// Every format parser implements this trait.
 pub trait Parser: Send + Sync {
     /// Returns the file formats this parser can handle.
@@ -36,5 +46,35 @@ pub trait Parser: Send + Sync {
     ) -> Result<Box<dyn Iterator<Item = Result<Element, FastRagError>> + 'a>, FastRagError> {
         let doc = self.parse(input, source)?;
         Ok(Box::new(doc.elements.into_iter().map(Ok)))
+    }
+}
+
+#[cfg(test)]
+mod multi_doc_parser_tests {
+    use super::*;
+    use std::path::Path;
+
+    struct StubMultiParser;
+
+    impl MultiDocParser for StubMultiParser {
+        fn parse_all(&self, _path: &Path) -> Result<Vec<Document>, FastRagError> {
+            Ok(vec![
+                Document {
+                    metadata: Metadata::new(FileFormat::Text),
+                    elements: vec![],
+                },
+                Document {
+                    metadata: Metadata::new(FileFormat::Text),
+                    elements: vec![],
+                },
+            ])
+        }
+    }
+
+    #[test]
+    fn multi_doc_parser_trait_is_implementable() {
+        let parser = StubMultiParser;
+        let docs = parser.parse_all(Path::new("dummy")).unwrap();
+        assert_eq!(docs.len(), 2);
     }
 }
