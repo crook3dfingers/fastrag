@@ -4,6 +4,8 @@ pub mod metadata;
 pub mod parser;
 pub mod schema;
 
+pub use parser::NvdFeedParser;
+
 #[cfg(test)]
 mod tests {
     #[test]

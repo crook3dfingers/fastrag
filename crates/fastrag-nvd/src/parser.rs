@@ -2,7 +2,9 @@
 
 use std::path::Path;
 
-use fastrag_core::{Document, Element, ElementKind, FastRagError, FileFormat, Metadata};
+use fastrag_core::{
+    Document, Element, ElementKind, FastRagError, FileFormat, Metadata, MultiDocParser,
+};
 
 use crate::metadata::cve_to_metadata;
 use crate::schema::NvdFeed;
@@ -17,14 +19,13 @@ pub fn is_nvd_feed(bytes: &[u8]) -> bool {
 
 /// Parser for NVD 2.0 JSON feed files.
 ///
-/// One call to `parse_all` on a yearly dump emits one `Document` per CVE
-/// record. Each document's metadata map is pre-populated with the Step 7
-/// metadata contract keys via the `custom` field.
+/// Implements `MultiDocParser` — one call on a yearly dump emits one `Document`
+/// per CVE record. Each document's `metadata.extra` map carries the Step 7
+/// metadata contract keys (cve_id, vuln_status, published_year, etc.).
 pub struct NvdFeedParser;
 
-impl NvdFeedParser {
-    /// Parse an NVD feed at `path` and return one `Document` per CVE.
-    pub fn parse_all(&self, path: &Path) -> Result<Vec<Document>, FastRagError> {
+impl MultiDocParser for NvdFeedParser {
+    fn parse_all(&self, path: &Path) -> Result<Vec<Document>, FastRagError> {
         let bytes = std::fs::read(path)?;
         let feed: NvdFeed = serde_json::from_slice(&bytes).map_err(|e| FastRagError::Parse {
             format: FileFormat::NvdFeed,
@@ -68,9 +69,9 @@ impl NvdFeedParser {
             let mut meta = Metadata::new(FileFormat::NvdFeed);
             meta.title = Some(id.clone());
             meta.source_file = Some(path.to_string_lossy().to_string());
-            // Attach the flat metadata map to the document's custom map so
-            // index_path_with_metadata can merge it into file_metadata.
-            meta.custom.extend(metadata_map);
+            // Store the flat metadata map in `extra` — the canonical ingest
+            // metadata field for structured parsers.
+            meta.extra = metadata_map;
 
             let doc = Document {
                 metadata: meta,
@@ -86,6 +87,7 @@ impl NvdFeedParser {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fastrag_core::MultiDocParser;
     use std::io::Write;
     use tempfile::NamedTempFile;
 
@@ -132,20 +134,20 @@ mod tests {
         tmp.write_all(ONE_CVE_JSON.as_bytes()).unwrap();
         let parser = NvdFeedParser;
         let docs = parser.parse_all(tmp.path()).unwrap();
-        let custom = &docs[0].metadata.custom;
+        let extra = &docs[0].metadata.extra;
         assert_eq!(
-            custom.get("cve_id").map(String::as_str),
+            extra.get("cve_id").map(String::as_str),
             Some("CVE-2024-99001")
         );
         assert_eq!(
-            custom.get("vuln_status").map(String::as_str),
+            extra.get("vuln_status").map(String::as_str),
             Some("Analyzed")
         );
         assert_eq!(
-            custom.get("published_year").map(String::as_str),
+            extra.get("published_year").map(String::as_str),
             Some("2024")
         );
-        assert_eq!(custom.get("source").map(String::as_str), Some("nvd"));
+        assert_eq!(extra.get("source").map(String::as_str), Some("nvd"));
     }
 
     #[test]
