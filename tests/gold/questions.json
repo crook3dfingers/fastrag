@@ -735,6 +735,55 @@
       "must_contain_cve_ids": [],
       "must_contain_terms": ["entity expansion", "denial of service"],
       "notes": "Concept lookup — XML bomb / XXE DoS"
+    },
+    {
+      "id": "hygiene-001",
+      "question": "What is the impact of the Log4Shell vulnerability CVE-2021-44228?",
+      "must_contain_cve_ids": ["CVE-2021-44228"],
+      "must_contain_terms": ["JNDI", "remote code execution"],
+      "notes": "Log4Shell should appear with kev_flag=true when KEV catalog is used"
+    },
+    {
+      "id": "hygiene-002",
+      "question": "Describe the HTTP/2 Rapid Reset Attack CVE-2023-44487.",
+      "must_contain_cve_ids": ["CVE-2023-44487"],
+      "must_contain_terms": ["denial of service"],
+      "notes": "Modified status CVE — must not be filtered"
+    },
+    {
+      "id": "hygiene-003",
+      "question": "What is the Spring4Shell vulnerability?",
+      "must_contain_cve_ids": ["CVE-2022-22965"],
+      "must_contain_terms": ["Spring Framework", "remote code execution"],
+      "notes": "CRITICAL severity — verify CVSS metadata round-trips"
+    },
+    {
+      "id": "hygiene-004",
+      "question": "Find information about CVE-2024-10001.",
+      "must_contain_cve_ids": [],
+      "must_contain_terms": [],
+      "notes": "NEGATIVE: Rejected CVE — must NOT appear in results when --security-profile is active. Eval harness should score 0 hits as correct."
+    },
+    {
+      "id": "hygiene-005",
+      "question": "Find information about CVE-2024-10002.",
+      "must_contain_cve_ids": [],
+      "must_contain_terms": [],
+      "notes": "NEGATIVE: Disputed CVE — must NOT appear in results when --security-profile is active."
+    },
+    {
+      "id": "hygiene-006",
+      "question": "Which Apache products have critical vulnerabilities?",
+      "must_contain_cve_ids": ["CVE-2021-44228"],
+      "must_contain_terms": ["apache", "critical"],
+      "notes": "Vendor facet via cpe_vendor=apache metadata"
+    },
+    {
+      "id": "hygiene-007",
+      "question": "What KEV vulnerabilities affect VMware Spring Framework?",
+      "must_contain_cve_ids": ["CVE-2022-22965"],
+      "must_contain_terms": ["Spring"],
+      "notes": "kev_flag test — Spring4Shell is in the test KEV minimal catalog fixture"
     }
   ]
 }
