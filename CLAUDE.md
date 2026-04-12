@@ -35,6 +35,12 @@ cargo test -p fastrag-eval --test baseline_diff                               # 
 FASTRAG_LLAMA_TEST=1 FASTRAG_RERANK_TEST=1 cargo test -p fastrag-cli --features eval,contextual,contextual-llama,retrieval,rerank,hybrid --test eval_matrix_e2e -- --ignored
 cargo test -p fastrag-cli --features eval --test eval_gold_set_rejects_invalid_e2e
 cargo clippy --workspace --all-targets --features retrieval,rerank,hybrid,contextual,eval -- -D warnings  # Full lint gate with eval
+cargo test -p fastrag-nvd                                                     # NVD crate unit tests
+cargo test -p fastrag-nvd --test nvd_end_to_end                               # NVD fixture integration test (5-CVE slice)
+cargo test -p fastrag --features hygiene --lib                                # Hygiene filters unit tests
+cargo test --workspace --features nvd,hygiene                                 # NVD parser + hygiene chain tests
+FASTRAG_NVD_TEST=1 cargo test -p fastrag-cli --features nvd,hygiene,retrieval --test security_profile_e2e -- --ignored  # End-to-end ingest with --security-profile (requires fastrag binary on PATH)
+cargo clippy --workspace --all-targets --features retrieval,rerank,hybrid,contextual,eval,nvd,hygiene -- -D warnings  # Full lint gate with hygiene
 cargo fmt --check            # Format check
 cargo build --release        # Release build (binary at target/release/fastrag)
 ```

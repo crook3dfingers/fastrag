@@ -43,6 +43,8 @@ jq '.runs[] | {variant, hit_at_5, mrr_at_10}' docs/eval-baselines/current.json
 
 ## Refresh flow
 
+After Phase 2 Step 7 (security corpus hygiene) landed on 2026-04-11, the gold set grew from 105 to 110 entries (5 new `hygiene-*` questions: Log4Shell, HTTP/2 Rapid Reset, Spring4Shell, Apache vendor facet, and KEV tagging). Refresh the baseline by running the capture command on a workstation with llama-server before the first post-Step-7 commit to `docs/eval-baselines/current.json`.
+
 Refreshes are deliberate human commits. Re-run the capture command above when a change legitimately improves retrieval quality — new embedder, tuned chunking, improved contextualization prompt. Review the diff and commit:
 
 ```bash

@@ -358,6 +358,57 @@ Hard-fail the ingest on any contextualization error:
 fastrag index ./docs --corpus ./corpus --contextualize --context-strict
 ```
 
+### Security Corpus Hygiene (optional)
+
+FastRAG ships an opt-in ingest-time filter chain tuned for security
+corpora (NVD, advisories, CVE dumps). The chain drops `Rejected` and
+`Disputed` CVEs, strips NVD boilerplate (`** REJECT **`, `** DISPUTED **`,
+CPE 2.3 URIs, reference URL blocks), filters non-English descriptions,
+and tags chunks whose CVE-IDs appear in CISA's Known Exploited
+Vulnerabilities catalog.
+
+Enable with `--security-profile` on `fastrag index`. Requires the `nvd`
+and `hygiene` feature flags.
+
+#### NVD feed ingest
+
+```bash
+cargo run --release -p fastrag-cli --features nvd,hygiene,retrieval -- \
+  index path/to/nvdcve-2.0-2024.json --corpus ./corpus \
+  --security-profile
+```
+
+NVD 2.0 JSON feeds are auto-detected by content sniffing. Each CVE becomes
+its own document with structured metadata (`cve_id`, `vuln_status`,
+`published_year`, `cvss_severity`, `cpe_vendor`, `cpe_product`,
+`description_lang`) queryable through the existing filter API.
+
+#### KEV catalog
+
+Tag documents whose CVE-IDs are in CISA's Known Exploited Vulnerabilities
+catalog by pointing at a local copy:
+
+```bash
+cargo run --release -p fastrag-cli --features nvd,hygiene,retrieval -- \
+  index path/to/nvdcve-2.0-2024.json --corpus ./corpus \
+  --security-profile \
+  --security-kev-catalog path/to/known_exploited_vulnerabilities.json
+```
+
+Accepts both the official CISA `vulnerabilities.json` shape and a minimal
+`{"cve_ids": ["CVE-..."]}` shape. Tagged chunks get `kev_flag=true` in
+metadata.
+
+#### Overrides
+
+```bash
+--security-lang en                            # target language (ISO 639-1)
+--security-reject-statuses Rejected,Disputed  # comma-separated vuln_status values to drop
+```
+
+The ingest summary reports `hygiene: rejected=N stripped=N lang-dropped=N
+kev-tagged=N`.
+
 ### Eval Harness (optional)
 
 FastRAG ships with a hand-curated gold set and a config matrix for measuring retrieval quality on every retrieval-touching change.

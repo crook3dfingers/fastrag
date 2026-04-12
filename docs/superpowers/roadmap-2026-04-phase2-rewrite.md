@@ -111,9 +111,11 @@ Each step is a sub-project with its own spec, plan, and PR. Issue numbers are pl
 - CI gates on `hit@5` and `MRR@10` against the gold set. Regression → red build.
 - Metrics emitted: retrieval hit@k, rerank delta, groundedness rate (if a generation step is wired), refusal rate, per-stage latency percentiles, cache hit rates.
 
-### Step 7 — Corpus hygiene (interleavable)
+### Step 7 — Corpus hygiene ✅ Shipped 2026-04-11
 
 **Goal.** Ingest-time filters that turn out to be correctness issues on security corpora, per the research doc. Can interleave with Step 4 or Step 5 as convenient.
+
+**Shipped.** `fastrag-nvd` parser crate ingesting NVD 2.0 JSON feeds with one document per CVE, each carrying `cve_id`, `vuln_status`, `published_year`, `cvss_severity`, `cpe_vendor`, `cpe_product`, and `description_lang` metadata. `fastrag/src/hygiene/` module behind a new `hygiene` feature gate: `ChunkFilter` / `DocFilter` / `MetadataEnricher` traits, `HygieneChain` composer with `HygieneStats` counters, `MetadataRejectFilter` (drops `Rejected`/`Disputed` CVEs), `BoilerplateStripper` (regex-driven removal of `** REJECT **`, `** DISPUTED **`, CPE 2.3 URIs, reference URL blocks), `LanguageFilter` (whatlang wrapper, `Drop`/`Flag` policy), `KevTemporalTagger` (CISA `vulnerabilities.json` or minimal `{cve_ids: []}` format). CLI: `fastrag index --security-profile [--security-lang en] [--security-kev-catalog path] [--security-reject-statuses ...]`. Ingest summary line: `hygiene: rejected=N stripped=N lang-dropped=N kev-tagged=N`. Five hygiene gold-set entries added under `tests/gold/questions.json`. **Deferred to Step 8:** GHSA/OSV parsers, cross-source dedup, live KEV catalog fetch, full CPE 2.3 structural normalization, negative gold-set schema.
 
 **Scope.**
 - Reject `vulnStatus: Rejected` / `Disputed` CVEs at ingest.
