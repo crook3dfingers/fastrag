@@ -16,6 +16,7 @@ pub mod kev;
 pub mod language;
 pub mod reject;
 
+pub use boilerplate::BoilerplateStripper;
 pub use reject::{DocFilter, MetadataRejectFilter};
 
 /// Per-run hygiene statistics surfaced to the CLI summary line.
