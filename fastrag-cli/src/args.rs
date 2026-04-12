@@ -205,6 +205,31 @@ pub enum Command {
         #[cfg(feature = "contextual")]
         #[arg(long)]
         retry_failed: bool,
+
+        /// Enable security corpus hygiene filters (NVD reject, boilerplate strip,
+        /// language filter). Requires --features hygiene on the facade crate.
+        #[cfg(feature = "hygiene")]
+        #[arg(long)]
+        security_profile: bool,
+
+        /// ISO 639-1 language code to keep; non-matching chunks are dropped.
+        /// Only used when --security-profile is set. Default: en.
+        #[cfg(feature = "hygiene")]
+        #[arg(long, default_value = "en")]
+        security_lang: String,
+
+        /// Path to a CISA KEV catalog JSON (vulnerabilities.json or
+        /// {cve_ids:[...]} minimal shape). Tags matching CVEs with kev_flag=true.
+        /// Only used when --security-profile is set.
+        #[cfg(feature = "hygiene")]
+        #[arg(long)]
+        security_kev_catalog: Option<PathBuf>,
+
+        /// Comma-separated vuln_status values to reject. Default: Rejected,Disputed.
+        /// Only used when --security-profile is set.
+        #[cfg(feature = "hygiene")]
+        #[arg(long, default_value = "Rejected,Disputed")]
+        security_reject_statuses: String,
     },
 
     /// Query an indexed corpus

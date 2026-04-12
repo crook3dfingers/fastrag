@@ -64,6 +64,8 @@ contextual-llama = [
     "fastrag-embed/llama-cpp",
 ]
 eval = ["dep:fastrag-eval", "dep:fastrag-embed", "fastrag-embed/legacy-candle", "fastrag-embed/test-utils"]
+nvd = ["fastrag/nvd"]
+hygiene = ["fastrag/hygiene"]
 
 [dev-dependencies]
 assert_cmd = "2"

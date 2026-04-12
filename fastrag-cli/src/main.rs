@@ -156,6 +156,14 @@ async fn main() {
             context_strict,
             #[cfg(feature = "contextual")]
             retry_failed,
+            #[cfg(feature = "hygiene")]
+            security_profile,
+            #[cfg(feature = "hygiene")]
+            security_lang,
+            #[cfg(feature = "hygiene")]
+            security_kev_catalog,
+            #[cfg(feature = "hygiene")]
+            security_reject_statuses,
         } => {
             #[cfg(feature = "contextual")]
             {
@@ -248,6 +256,44 @@ async fn main() {
                             strict: context_strict,
                         });
 
+                #[cfg(feature = "hygiene")]
+                let hygiene_chain = if security_profile {
+                    use fastrag::hygiene::{KevTemporalTagger, security_default_chain};
+                    let statuses: Vec<String> = security_reject_statuses
+                        .split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                    let mut chain = security_default_chain(if statuses.is_empty() {
+                        None
+                    } else {
+                        Some(statuses)
+                    });
+                    if let Some(kev_path) = security_kev_catalog {
+                        match KevTemporalTagger::from_path(&kev_path) {
+                            Ok(tagger) => chain = chain.with_enricher(Box::new(tagger)),
+                            Err(e) => {
+                                eprintln!("Error loading KEV catalog: {e}");
+                                std::process::exit(1);
+                            }
+                        }
+                    }
+                    // Honour --security-lang if it differs from the default "en".
+                    if security_lang != "en" {
+                        use fastrag::hygiene::{LanguageFilter, LanguagePolicy};
+                        // Replace the default LanguageFilter by appending a custom one.
+                        // (The default "en" filter is already in the chain; append a
+                        //  second pass for the custom lang so the stricter one wins.)
+                        chain = chain.with_chunk_filter(Box::new(LanguageFilter::new(
+                            security_lang,
+                            LanguagePolicy::Drop,
+                        )));
+                    }
+                    Some(chain)
+                } else {
+                    None
+                };
+
                 match ops::index_path_with_metadata(
                     &input,
                     &corpus,
@@ -256,6 +302,8 @@ async fn main() {
                     &base_metadata,
                     #[cfg(feature = "contextual")]
                     contextualize_opts,
+                    #[cfg(feature = "hygiene")]
+                    hygiene_chain.as_ref(),
                 ) {
                     Ok(stats) => {
                         println!("{}", serde_json::to_string_pretty(&stats).unwrap());
@@ -269,6 +317,17 @@ async fn main() {
                             stats.chunks_added,
                             stats.chunks_removed,
                         );
+                        #[cfg(feature = "hygiene")]
+                        if security_profile {
+                            let h = &stats.hygiene;
+                            println!(
+                                "hygiene: rejected={} stripped={} lang-dropped={} kev-tagged={}",
+                                h.docs_rejected,
+                                h.chunks_stripped,
+                                h.chunks_lang_dropped,
+                                h.chunks_kev_tagged,
+                            );
+                        }
                         #[cfg(feature = "contextual")]
                         if contextualize {
                             println!(
