@@ -19,6 +19,8 @@ pub enum FileFormat {
     Epub,
     Rtf,
     Email,
+    /// NVD 2.0 JSON feed (one file contains many CVE records).
+    NvdFeed,
     Unknown,
 }
 
@@ -37,6 +39,7 @@ impl fmt::Display for FileFormat {
             Self::Epub => write!(f, "EPUB"),
             Self::Rtf => write!(f, "RTF"),
             Self::Email => write!(f, "Email"),
+            Self::NvdFeed => write!(f, "nvd-feed"),
             Self::Unknown => write!(f, "Unknown"),
         }
     }
@@ -45,6 +48,14 @@ impl fmt::Display for FileFormat {
 impl FileFormat {
     /// Detect the file format from a path (extension) with magic-byte fallback.
     pub fn detect(path: &Path, first_bytes: &[u8]) -> Self {
+        // NVD 2.0 feed detection: schema marker takes priority over extension.
+        let snippet = std::str::from_utf8(&first_bytes[..first_bytes.len().min(512)]).unwrap_or("");
+        if snippet.contains("\"NVD_CVE\"")
+            || (snippet.contains("\"vulnerabilities\"") && snippet.contains("\"format\""))
+        {
+            return FileFormat::NvdFeed;
+        }
+
         if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
             match ext.to_lowercase().as_str() {
                 "pdf" => return Self::Pdf,
