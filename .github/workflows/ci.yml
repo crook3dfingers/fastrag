@@ -22,3 +22,82 @@ jobs:
         run: cargo clippy --workspace --all-targets --features retrieval,rerank -- -D warnings
       - name: Format check
         run: cargo fmt --check
+
+  eval-gate:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    timeout-minutes: 10
+    env:
+      FASTRAG_LLAMA_TEST: "1"
+      FASTRAG_RERANK_TEST: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Restore eval corpus cache
+        id: corpus_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: eval-corpus
+          key: eval-corpus-${{ hashFiles('tests/gold/corpus/**', 'crates/fastrag-embed/**', 'crates/fastrag-index/**') }}
+
+      - name: Skip gate on cache miss
+        if: steps.corpus_cache.outputs.cache-hit != 'true'
+        run: |
+          echo "::warning::eval corpus cache miss — gate skipped, will run in next weekly"
+          exit 0
+
+      - name: Install llama-server
+        if: steps.corpus_cache.outputs.cache-hit == 'true'
+        run: |
+          LLAMA_TAG="b8739"
+          curl -fsSL "https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_TAG}/llama-${LLAMA_TAG}-bin-ubuntu-x64.tar.gz" -o llama.tar.gz
+          tar xzf llama.tar.gz
+          sudo mkdir -p /opt/llama
+          sudo cp -a llama-${LLAMA_TAG}/* /opt/llama/
+          sudo ln -sf /opt/llama/llama-server /usr/local/bin/llama-server
+          echo "LD_LIBRARY_PATH=/opt/llama" >> "$GITHUB_ENV"
+
+      - name: Cache GGUF reranker model
+        if: steps.corpus_cache.outputs.cache-hit == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/fastrag/models/bge-reranker-v2-m3-q8_0.gguf
+          key: gguf-bge-reranker-v2-m3-q8
+
+      - name: Download BGE reranker GGUF
+        if: steps.corpus_cache.outputs.cache-hit == 'true'
+        run: |
+          MODEL_DIR="$HOME/.cache/fastrag/models"
+          MODEL_FILE="bge-reranker-v2-m3-q8_0.gguf"
+          if [ ! -f "$MODEL_DIR/$MODEL_FILE" ]; then
+            mkdir -p "$MODEL_DIR"
+            curl -fsSL "https://huggingface.co/klnstpr/bge-reranker-v2-m3-Q8_0-GGUF/resolve/main/$MODEL_FILE" -o "$MODEL_DIR/$MODEL_FILE"
+          fi
+
+      - name: Check for eval regression waiver
+        if: steps.corpus_cache.outputs.cache-hit == 'true'
+        id: waiver
+        run: |
+          TRAILER=$(git log -1 --format='%(trailers:key=Eval-Regression-Justified,valueonly)')
+          if [ -n "$TRAILER" ]; then
+            echo "waived=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Eval regression waived: $TRAILER"
+          else
+            echo "waived=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run eval matrix (query-only)
+        if: steps.corpus_cache.outputs.cache-hit == 'true' && steps.waiver.outputs.waived != 'true'
+        run: |
+          cargo run --release -p fastrag-cli --bin fastrag \
+            --features eval,retrieval,rerank,rerank-llama,hybrid,contextual,contextual-llama -- \
+            eval \
+            --gold-set tests/gold/questions.json \
+            --corpus eval-corpus/ctx \
+            --corpus-no-contextual eval-corpus/raw \
+            --config-matrix \
+            --variants primary,no_rerank \
+            --baseline docs/eval-baselines/current.json \
+            --report "$RUNNER_TEMP/matrix.json"
