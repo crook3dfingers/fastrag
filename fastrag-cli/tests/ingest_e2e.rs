@@ -271,3 +271,91 @@ async fn ingest_rejects_oversized_body() {
         resp.status()
     );
 }
+
+#[tokio::test]
+async fn ingest_requires_auth_when_token_set() {
+    let corpus_dir = tempfile::tempdir().unwrap();
+    let registry = CorpusRegistry::new();
+    registry.register("default", corpus_dir.path().to_path_buf());
+
+    let embedder: fastrag::DynEmbedder = Arc::new(MockEmbedder);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let secret = "test-secret-token";
+
+    tokio::spawn(async move {
+        serve_http_with_registry(
+            registry,
+            listener,
+            embedder,
+            Some(secret.to_string()),
+            false,
+            HttpRerankerConfig::default(),
+            100,
+            None,
+            52_428_800,
+        )
+        .await
+        .unwrap();
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    let client = reqwest::Client::new();
+    let body = r#"{"id":"v1","body":"test record"}"#;
+    let url = format!("http://{}/ingest?id_field=id&text_fields=body", addr);
+
+    // 1. POST without token → 401
+    let resp = client
+        .post(&url)
+        .header("content-type", "application/x-ndjson")
+        .body(format!("{}\n", body))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        401,
+        "POST /ingest without token should be 401"
+    );
+
+    // 2. POST with correct token → 200
+    let resp = client
+        .post(&url)
+        .header("content-type", "application/x-ndjson")
+        .header("x-fastrag-token", secret)
+        .body(format!("{}\n", body))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        200,
+        "POST /ingest with valid token should be 200"
+    );
+
+    // 3. DELETE without token → 401
+    let resp = client
+        .delete(format!("http://{}/ingest/v1?corpus=default", addr))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        401,
+        "DELETE /ingest/:id without token should be 401"
+    );
+
+    // 4. DELETE with correct token → 200
+    let resp = client
+        .delete(format!("http://{}/ingest/v1?corpus=default", addr))
+        .header("x-fastrag-token", secret)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        200,
+        "DELETE /ingest/:id with valid token should be 200"
+    );
+}
