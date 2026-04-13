@@ -39,6 +39,17 @@ impl ConfigVariant {
         ]
     }
 
+    /// Parse a variant from its stable label string.
+    pub fn from_label(s: &str) -> Option<ConfigVariant> {
+        match s {
+            "primary" => Some(ConfigVariant::Primary),
+            "no_rerank" => Some(ConfigVariant::NoRerank),
+            "no_contextual" => Some(ConfigVariant::NoContextual),
+            "dense_only" => Some(ConfigVariant::DenseOnly),
+            _ => None,
+        }
+    }
+
     /// Stable label used in JSON reports and log output.
     pub fn label(&self) -> &'static str {
         match self {
@@ -177,6 +188,7 @@ pub fn run_matrix<D: CorpusDriver>(
     driver: &D,
     gold_set: &GoldSet,
     top_k: usize,
+    variants: Option<&[ConfigVariant]>,
 ) -> Result<MatrixReport, EvalError> {
     // ── Batch-embed all queries once ─────────────────────────────────────
     // Query embeddings are corpus-independent, so one batch covers all four
@@ -205,7 +217,10 @@ pub fn run_matrix<D: CorpusDriver>(
 
     let mut variant_reports: Vec<VariantReport> = Vec::with_capacity(4);
 
-    for variant in ConfigVariant::all() {
+    let active: Vec<ConfigVariant> =
+        variants.map_or_else(|| ConfigVariant::all().to_vec(), |v| v.to_vec());
+
+    for variant in &active {
         // Per-stage histograms for this variant.
         let mut h_total = new_hist();
         let mut h_embed = new_hist();
@@ -229,9 +244,9 @@ pub fn run_matrix<D: CorpusDriver>(
                 ..Default::default()
             };
             let chunks = driver
-                .query(variant, &entry.question, vector, top_k, &mut bd)
+                .query(*variant, &entry.question, vector, top_k, &mut bd)
                 .map_err(|e| EvalError::MatrixVariant {
-                    variant,
+                    variant: *variant,
                     source: Box::new(e),
                 })?;
 
@@ -281,7 +296,7 @@ pub fn run_matrix<D: CorpusDriver>(
         };
 
         variant_reports.push(VariantReport {
-            variant,
+            variant: *variant,
             hit_at_1,
             hit_at_5,
             hit_at_10,
@@ -344,5 +359,13 @@ mod tests {
         assert_eq!(ConfigVariant::NoRerank.label(), "no_rerank");
         assert_eq!(ConfigVariant::NoContextual.label(), "no_contextual");
         assert_eq!(ConfigVariant::DenseOnly.label(), "dense_only");
+    }
+
+    #[test]
+    fn from_label_round_trips_all_variants() {
+        for v in ConfigVariant::all() {
+            assert_eq!(ConfigVariant::from_label(v.label()), Some(v));
+        }
+        assert_eq!(ConfigVariant::from_label("bogus"), None);
     }
 }

@@ -539,6 +539,7 @@ async fn main() {
             corpus,
             corpus_no_contextual,
             config_matrix,
+            variants,
             baseline,
         } => {
             if config_matrix {
@@ -549,6 +550,7 @@ async fn main() {
                     report,
                     top_k,
                     baseline,
+                    variants,
                 ) {
                     eprintln!("Error running eval matrix: {e}");
                     std::process::exit(1);

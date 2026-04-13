@@ -83,11 +83,13 @@ pub fn diff(report: &MatrixReport, baseline: &Baseline) -> Result<BaselineDiff, 
 
     let mut regressions = Vec::new();
     for base in &baseline.runs {
-        let run = report
-            .runs
-            .iter()
-            .find(|r| r.variant == base.variant)
-            .ok_or(EvalError::BaselineVariantMissing(base.variant))?;
+        let Some(run) = report.runs.iter().find(|r| r.variant == base.variant) else {
+            eprintln!(
+                "[baseline] skipping {:?} — not in current run",
+                base.variant
+            );
+            continue;
+        };
 
         check(
             &mut regressions,
@@ -234,6 +236,31 @@ mod tests {
     fn render_report_no_regressions_is_ok_line() {
         let d = BaselineDiff::default();
         assert!(d.render_report().contains("Baseline OK"));
+    }
+
+    #[test]
+    fn partial_report_skips_missing_variants() {
+        // Baseline has Primary + NoRerank; report only has Primary.
+        let report = mk_report(0.82, 0.71);
+        let baseline = Baseline {
+            schema_version: 1,
+            git_rev: "x".into(),
+            captured_at: "x".into(),
+            runs: vec![
+                VariantBaseline {
+                    variant: ConfigVariant::Primary,
+                    hit_at_5: 0.82,
+                    mrr_at_10: 0.71,
+                },
+                VariantBaseline {
+                    variant: ConfigVariant::NoRerank,
+                    hit_at_5: 0.75,
+                    mrr_at_10: 0.65,
+                },
+            ],
+        };
+        let d = diff(&report, &baseline).expect("should not error on missing variant");
+        assert!(!d.has_regressions());
     }
 
     #[test]

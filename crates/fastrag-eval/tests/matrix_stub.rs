@@ -89,7 +89,7 @@ fn multi_entry_gold_set() -> GoldSet {
 #[test]
 fn run_matrix_executes_all_four_variants_in_order() {
     let gs = single_entry_gold_set();
-    let report = run_matrix(&StubDriver, &gs, 5).expect("run_matrix should succeed");
+    let report = run_matrix(&StubDriver, &gs, 5, None).expect("run_matrix should succeed");
     assert_eq!(report.runs.len(), 4);
     assert_eq!(report.runs[0].variant, ConfigVariant::Primary);
     assert_eq!(report.runs[1].variant, ConfigVariant::NoRerank);
@@ -100,7 +100,7 @@ fn run_matrix_executes_all_four_variants_in_order() {
 #[test]
 fn run_matrix_records_every_stage_histogram() {
     let gs = single_entry_gold_set();
-    let report = run_matrix(&StubDriver, &gs, 5).expect("run_matrix should succeed");
+    let report = run_matrix(&StubDriver, &gs, 5, None).expect("run_matrix should succeed");
     for variant_report in &report.runs {
         assert!(
             variant_report.latency.total.p50_us > 0,
@@ -128,7 +128,7 @@ fn run_matrix_records_every_stage_histogram() {
 #[test]
 fn run_matrix_per_question_count_matches_entries() {
     let gs = multi_entry_gold_set();
-    let report = run_matrix(&StubDriver, &gs, 5).expect("run_matrix should succeed");
+    let report = run_matrix(&StubDriver, &gs, 5, None).expect("run_matrix should succeed");
     for variant_report in &report.runs {
         assert_eq!(
             variant_report.per_question.len(),
@@ -143,10 +143,20 @@ fn run_matrix_per_question_count_matches_entries() {
 fn run_matrix_hybrid_delta_positive_when_dense_misses() {
     // StubDriver returns a hit for Primary but a miss for DenseOnly.
     let gs = single_entry_gold_set();
-    let report = run_matrix(&StubDriver, &gs, 5).expect("run_matrix should succeed");
+    let report = run_matrix(&StubDriver, &gs, 5, None).expect("run_matrix should succeed");
     assert!(
         report.hybrid_delta > 0.0,
         "hybrid_delta should be positive when DenseOnly misses; got {}",
         report.hybrid_delta
     );
+}
+
+#[test]
+fn run_matrix_with_variant_filter_runs_only_selected() {
+    let gs = single_entry_gold_set();
+    let filter = [ConfigVariant::Primary, ConfigVariant::NoRerank];
+    let report = run_matrix(&StubDriver, &gs, 5, Some(&filter)).expect("run_matrix should succeed");
+    assert_eq!(report.runs.len(), 2);
+    assert_eq!(report.runs[0].variant, ConfigVariant::Primary);
+    assert_eq!(report.runs[1].variant, ConfigVariant::NoRerank);
 }

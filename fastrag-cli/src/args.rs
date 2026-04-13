@@ -400,6 +400,11 @@ pub enum Command {
         #[arg(long, default_value_t = false)]
         config_matrix: bool,
 
+        /// Comma-separated variant labels to run (default: all four).
+        /// Values: primary, no_rerank, no_contextual, dense_only
+        #[arg(long)]
+        variants: Option<String>,
+
         /// Path to a checked-in baseline JSON. Non-zero exit on >2% regression.
         #[arg(long)]
         baseline: Option<PathBuf>,

@@ -9,7 +9,7 @@ use fastrag_eval::{
     EvalError,
     baseline::{diff, load_baseline},
     gold_set,
-    matrix::run_matrix,
+    matrix::{ConfigVariant, run_matrix},
     matrix_real::RealCorpusDriver,
     write_matrix_report,
 };
@@ -21,6 +21,7 @@ pub fn run_config_matrix(
     report_path: PathBuf,
     top_k: usize,
     baseline_path: Option<PathBuf>,
+    variants: Option<String>,
 ) -> Result<(), EvalError> {
     let gs_path = gold_set_path.ok_or(EvalError::MatrixRequiresGoldSet)?;
     let ctx_corpus = corpus
@@ -54,7 +55,20 @@ pub fn run_config_matrix(
     )
     .map_err(|e| EvalError::Runner(format!("loading corpus driver: {e}")))?;
 
-    let matrix_report = run_matrix(&driver, &gs, top_k)?;
+    let variant_filter: Option<Vec<ConfigVariant>> = variants.map(|s| {
+        s.split(',')
+            .map(|label| {
+                ConfigVariant::from_label(label.trim()).unwrap_or_else(|| {
+                    panic!(
+                        "unknown variant '{}'; valid: primary, no_rerank, no_contextual, dense_only",
+                        label.trim()
+                    )
+                })
+            })
+            .collect()
+    });
+
+    let matrix_report = run_matrix(&driver, &gs, top_k, variant_filter.as_deref())?;
 
     write_matrix_report(&matrix_report, &report_path)?;
 
