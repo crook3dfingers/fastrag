@@ -32,7 +32,7 @@ blake3 = { workspace = true, optional = true }
 chrono = { workspace = true, optional = true }
 regex = { workspace = true, optional = true }
 whatlang = { version = "0.16", optional = true }
-rayon = { workspace = true }
+rayon = { workspace = true, optional = true }
 thiserror.workspace = true
 
 [dev-dependencies]
@@ -65,7 +65,7 @@ language-detection = ["fastrag-core/language-detection"]
 embedding = ["dep:fastrag-embed"]
 legacy-candle = ["embedding", "fastrag-embed/legacy-candle"]
 index = ["dep:fastrag-index"]
-retrieval = ["embedding", "index", "store"]
+retrieval = ["embedding", "index", "store", "dep:rayon"]
 rerank = ["retrieval", "dep:fastrag-rerank"]
 rerank-llama = ["rerank", "fastrag-rerank/llama-cpp"]
 contextual = ["retrieval", "dep:fastrag-context", "dep:blake3"]
