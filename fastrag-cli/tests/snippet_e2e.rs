@@ -94,7 +94,10 @@ async fn snippet_present_in_response() {
     assert!(!hits.is_empty());
     let snippet = &hits[0]["snippet"];
     assert!(snippet.is_string(), "snippet should be a string: {snippet}");
-    assert!(!snippet.as_str().unwrap().is_empty(), "snippet should not be empty");
+    assert!(
+        !snippet.as_str().unwrap().is_empty(),
+        "snippet should not be empty"
+    );
 }
 
 #[tokio::test]

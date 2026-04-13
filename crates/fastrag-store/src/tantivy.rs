@@ -463,28 +463,26 @@ impl TantivyStore {
             Err(_) => return vec![None; ids.len()],
         };
 
-        let mut generator =
-            match SnippetGenerator::create(&searcher, &*query, self.core.chunk_text) {
-                Ok(g) => g,
-                Err(_) => return vec![None; ids.len()],
-            };
+        let mut generator = match SnippetGenerator::create(&searcher, &*query, self.core.chunk_text)
+        {
+            Ok(g) => g,
+            Err(_) => return vec![None; ids.len()],
+        };
         generator.set_max_num_chars(max_chars);
 
         let mut results = Vec::with_capacity(ids.len());
         for &id_val in ids {
             let term = tantivy::Term::from_field_u64(self.core.id, id_val);
-            let id_query = tantivy::query::TermQuery::new(
-                term,
-                tantivy::schema::IndexRecordOption::Basic,
-            );
-            let top =
-                match searcher.search(&id_query, &tantivy::collector::TopDocs::with_limit(1)) {
-                    Ok(t) => t,
-                    Err(_) => {
-                        results.push(None);
-                        continue;
-                    }
-                };
+            let id_query =
+                tantivy::query::TermQuery::new(term, tantivy::schema::IndexRecordOption::Basic);
+            let top = match searcher.search(&id_query, &tantivy::collector::TopDocs::with_limit(1))
+            {
+                Ok(t) => t,
+                Err(_) => {
+                    results.push(None);
+                    continue;
+                }
+            };
             if let Some((_score, addr)) = top.first() {
                 match searcher.doc::<TantivyDocument>(*addr) {
                     Ok(doc) => {
