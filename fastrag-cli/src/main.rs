@@ -176,6 +176,8 @@ async fn main() {
             metadata_types,
             #[cfg(feature = "store")]
             array_fields,
+            #[cfg(feature = "store")]
+            preset,
         } => {
             #[cfg(feature = "contextual")]
             {
@@ -199,14 +201,43 @@ async fn main() {
                         || input.extension().map(|e| e == "jsonl").unwrap_or(false);
 
                     if is_jsonl {
+                        let base = preset.map(|p| match p {
+                            args::IngestPresetArg::TarmoFinding => {
+                                fastrag::ingest::presets::tarmo_finding_preset()
+                            }
+                        });
                         let config = fastrag::ingest::jsonl::JsonlIngestConfig {
-                            text_fields: text_fields.unwrap_or_default(),
-                            id_field: id_field.unwrap_or_else(|| "id".into()),
-                            metadata_fields: metadata_fields.unwrap_or_default(),
-                            metadata_types: parse_metadata_types(
-                                &metadata_types.unwrap_or_default(),
-                            ),
-                            array_fields: array_fields.unwrap_or_default(),
+                            text_fields: text_fields.unwrap_or_else(|| {
+                                base.as_ref()
+                                    .map(|c| c.text_fields.clone())
+                                    .unwrap_or_default()
+                            }),
+                            id_field: id_field.unwrap_or_else(|| {
+                                base.as_ref()
+                                    .map(|c| c.id_field.clone())
+                                    .unwrap_or_else(|| "id".into())
+                            }),
+                            metadata_fields: metadata_fields.unwrap_or_else(|| {
+                                base.as_ref()
+                                    .map(|c| c.metadata_fields.clone())
+                                    .unwrap_or_default()
+                            }),
+                            metadata_types: if metadata_types
+                                .as_ref()
+                                .map(|v| !v.is_empty())
+                                .unwrap_or(false)
+                            {
+                                parse_metadata_types(&metadata_types.unwrap_or_default())
+                            } else {
+                                base.as_ref()
+                                    .map(|c| c.metadata_types.clone())
+                                    .unwrap_or_default()
+                            },
+                            array_fields: array_fields.unwrap_or_else(|| {
+                                base.as_ref()
+                                    .map(|c| c.array_fields.clone())
+                                    .unwrap_or_default()
+                            }),
                         };
                         let chunking = chunking_from_args(
                             chunk_strategy,
@@ -435,6 +466,7 @@ async fn main() {
             ollama_model,
             ollama_url,
             filter,
+            filter_json,
             dense_only,
             #[cfg(feature = "rerank")]
             rerank,
@@ -456,16 +488,18 @@ async fn main() {
                     eprintln!("Error loading embedder: {e}");
                     std::process::exit(1);
                 });
-                let filter_map = match filter.as_deref() {
-                    Some(s) => match args::parse_filter(s) {
-                        Ok(m) => m,
-                        Err(e) => {
+                let filter_expr: Option<fastrag::filter::FilterExpr> =
+                    match (filter.as_deref(), filter_json.as_deref()) {
+                        (Some(s), None) => Some(args::parse_filter_expr(s).unwrap_or_else(|e| {
                             eprintln!("Error parsing --filter: {e}");
                             std::process::exit(2);
-                        }
-                    },
-                    None => std::collections::BTreeMap::new(),
-                };
+                        })),
+                        (None, Some(j)) => Some(serde_json::from_str(j).unwrap_or_else(|e| {
+                            eprintln!("Error parsing --filter-json: {e}");
+                            std::process::exit(2);
+                        })),
+                        _ => None,
+                    };
 
                 #[cfg(feature = "rerank")]
                 let use_rerank = !no_rerank;
@@ -489,7 +523,7 @@ async fn main() {
                             rerank_over_fetch,
                             embedder.as_ref() as &dyn DynEmbedderTrait,
                             reranker.as_ref(),
-                            &filter_map,
+                            filter_expr.as_ref(),
                             &mut fastrag::corpus::LatencyBreakdown::default(),
                         )
                     }
@@ -503,7 +537,7 @@ async fn main() {
                         &query,
                         top_k,
                         embedder.as_ref() as &dyn DynEmbedderTrait,
-                        &filter_map,
+                        filter_expr.as_ref(),
                         &mut fastrag::corpus::LatencyBreakdown::default(),
                     )
                 };

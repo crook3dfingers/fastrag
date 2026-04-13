@@ -23,6 +23,13 @@ pub fn parse_filter(s: &str) -> Result<std::collections::BTreeMap<String, String
     Ok(out)
 }
 
+/// Parse a `--filter` string into a FilterExpr. Supports both legacy `k=v,k2=v2`
+/// format and the new filter syntax (e.g. `severity = HIGH AND cvss_score >= 7.0`).
+#[cfg(feature = "store")]
+pub fn parse_filter_expr(s: &str) -> Result<fastrag::filter::FilterExpr, String> {
+    fastrag::filter::parse(s).map_err(|e| e.to_string())
+}
+
 #[cfg(feature = "retrieval")]
 #[derive(Clone, Copy, ValueEnum, PartialEq, Eq)]
 pub enum EmbedderKindArg {
@@ -39,6 +46,12 @@ pub enum RerankerKindArg {
     LlamaCpp,
 }
 
+#[cfg(feature = "store")]
+#[derive(Clone, Copy, ValueEnum, PartialEq, Eq, Debug)]
+pub enum IngestPresetArg {
+    TarmoFinding,
+}
+
 #[derive(Parser)]
 #[command(name = "fastrag", about = "Fast document parser for AI/RAG pipelines")]
 #[command(version)]
@@ -48,6 +61,7 @@ pub struct Cli {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 pub enum Command {
     /// Parse one or more files
     Parse {
@@ -260,6 +274,11 @@ pub enum Command {
         #[cfg(feature = "store")]
         #[arg(long, value_delimiter = ',')]
         array_fields: Option<Vec<String>>,
+
+        /// Ingest preset (pre-fills text-fields, metadata-fields, etc.)
+        #[cfg(feature = "store")]
+        #[arg(long)]
+        preset: Option<IngestPresetArg>,
     },
 
     /// Query an indexed corpus
@@ -305,10 +324,16 @@ pub enum Command {
         #[arg(long, default_value = "http://localhost:11434")]
         ollama_url: String,
 
-        /// Comma-separated equality filters (e.g. `customer=acme,severity=high`).
-        /// AND-combined; applied as a post-filter over the HNSW fan-out.
+        /// Filter expression: supports legacy `k=v,k2=v2` comma format and
+        /// rich syntax (e.g. `severity = HIGH AND cvss_score >= 7.0`).
+        /// Applied as a post-filter over the HNSW fan-out.
         #[arg(long)]
         filter: Option<String>,
+
+        /// JSON AST filter expression (for scripts piping complex filters).
+        /// Mutually exclusive with --filter.
+        #[arg(long, conflicts_with = "filter")]
+        filter_json: Option<String>,
 
         /// Skip BM25/Tantivy and use dense vector search only.
         #[arg(long)]
