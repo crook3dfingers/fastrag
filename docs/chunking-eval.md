@@ -1,72 +1,54 @@
-# Chunking Strategy Sweep (#30)
+# Chunking Strategy Evaluation
 
-Eval-driven evaluation of chunking strategy × `max_characters` × `overlap` against
-the v0-phase1 baselines. The current default (`Basic`, 1000 chars, 0 overlap) is a
-guess; this page tracks the data that justifies the production default.
+## Defaults
 
-## Status
+| Parameter | Default | Rationale |
+|-----------|---------|-----------|
+| `--chunk-strategy` | `recursive` | Preserves sentence and paragraph boundaries better than fixed-size splits, reducing mid-sentence cuts that degrade embedding quality |
+| `--chunk-size` | `1000` | Fits within Qwen3-Embedding-0.6B's 8k context window while keeping chunks short enough for precise retrieval |
+| `--chunk-overlap` | `200` | 20% overlap retains cross-boundary context without redundant storage; standard recommendation in RAG literature |
 
-**Sweep automation:** ready (`scripts/run-chunking-sweep.sh`).
-**Full results:** pending — see "Compute budget" below.
+## Why no sweep results
 
-The sweep script writes one report JSON per combination plus a `summary.tsv` table.
-Run it locally with:
+A systematic sweep (all combinations of strategy × size × overlap) requires a corpus
+large enough to produce low-variance measurements. The gold set (`tests/gold/corpus/`)
+has 50 documents — too few to reliably distinguish a 1–2% hit@5 difference caused by
+chunking from one caused by sampling noise.
+
+A second factor: contextual retrieval generates a 50–100 token context prefix for
+every chunk at ingest. The LLM prefix substantially reduces sensitivity to chunking
+boundaries, compressing the performance gap between strategies.
+
+For a meaningful sweep, use a corpus of at least 500 documents with at least 500
+questions and run it with GPU-accelerated llama-server. The `scripts/chunking-sweep.sh`
+script is ready for this.
+
+## Re-evaluating defaults
+
+Run the sweep against a larger corpus and compare hit@5 across combos:
 
 ```bash
-scripts/run-chunking-sweep.sh                         # full grid
-scripts/run-chunking-sweep.sh \
-    --strategies basic,recursive --sizes 500,1000 \
-    --overlaps 0,200 --datasets nfcorpus              # focused subset
+bash scripts/chunking-sweep.sh
+sort -t$'\t' -k7 -rn target/chunking-sweep/results.tsv | head -10
 ```
+
+If a different combo wins by more than 2% hit@5, update the defaults in
+`fastrag-cli/src/args.rs` (`default_value` for `--chunk-strategy` and
+`default_value_t` for `--chunk-overlap`).
 
 ## Sweep grid
 
 | Axis | Values |
 |------|--------|
 | Strategy | `basic`, `by-title`, `recursive` |
-| `max_characters` | 500, 800, 1000, 1500 |
-| `overlap` | 0, 100, 200 |
-| Datasets | nfcorpus, scifact (sampled 500/50, same as v0-phase1) |
-| Top-k | 20 |
+| `--chunk-size` | 500, 800, 1000, 1500 |
+| `--chunk-overlap` | 0, 100, 200 |
 
-`Semantic` chunking is excluded from the v1 sweep — it requires an embedder pass
-during chunking and would balloon wall-clock by another order of magnitude on the
-CPU box. It will be added once embedder perf work lands.
+`semantic` chunking is excluded — it requires an embedder pass during chunking,
+which multiplies wall-clock by another order of magnitude on CPU.
 
-## Compute budget
+## References
 
-The full grid is 3 strategies × 4 sizes × 3 overlaps × 2 datasets = **72 runs**.
-On the v0-phase1 reference box (pure-CPU candle, BGE-small), one nfcorpus 500/50
-sample run takes ~5 minutes after the sorted-batching speedup (76eb4ca). 72 runs ≈
-**6 hours** of wallclock — too long for an interactive session.
-
-Closing the gap requires either:
-
-1. The candle MKL/Accelerate path landing in #34, or
-2. A faster reference machine for the sweep.
-
-Either path is tracked in the issue body. Until then, this page documents the
-methodology and the script; partial sweeps can be committed under `docs/chunking-sweep/`
-as they're produced.
-
-## Results
-
-_Pending. The first row in the table below is the existing v0-phase1 baseline,
-included as the control point against which sweep results will be diffed._
-
-| Dataset | Strategy | Size | Overlap | recall@10 | nDCG@10 | p95 ms | build s | peak RSS MB |
-|---------|----------|-----:|--------:|----------:|--------:|-------:|--------:|------------:|
-| nfcorpus | basic | 1000 | 0 | 0.128 | 0.109 | 26.1 | 390 | 188 |
-| scifact  | basic | 1000 | 0 | 0.080 | 0.057 | 46.2 | 327 | 160 |
-
-## Picking the default
-
-Once the sweep finishes, the new default is whichever (strategy, size, overlap)
-combination maximizes nDCG@10 averaged across nfcorpus and scifact, subject to:
-
-- Build time ≤ 2× the current baseline
-- Peak RSS ≤ 1.5× the current baseline
-- Does not regress recall@10 vs baseline on either dataset
-
-The chosen default lands as a follow-up PR that updates `crates/fastrag-cli/src/args.rs`
-and adds a CHANGELOG migration note (existing corpora must be reindexed to benefit).
+- Anthropic Contextual Retrieval (Sept 2024): chunking sensitivity reduced when context prefixes are added
+- `docs/rag-research-2026-04.md`: §3 chunking, recommendation for recursive + overlap on technical prose
+- `scripts/chunking-sweep.sh`: sweep implementation (36 combos: 3 strategies × 4 sizes × 3 overlaps)

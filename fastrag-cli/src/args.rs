@@ -138,7 +138,7 @@ pub enum Command {
         corpus: PathBuf,
 
         /// Chunking strategy (none, basic, by-title, recursive, semantic)
-        #[arg(long, default_value = "basic")]
+        #[arg(long, default_value = "recursive")]
         chunk_strategy: ChunkStrategyArg,
 
         /// Maximum characters per chunk
@@ -146,7 +146,7 @@ pub enum Command {
         chunk_size: usize,
 
         /// Number of overlapping characters between consecutive chunks
-        #[arg(long, default_value_t = 0)]
+        #[arg(long, default_value_t = 200)]
         chunk_overlap: usize,
 
         /// Comma-separated list of separators for recursive strategy
