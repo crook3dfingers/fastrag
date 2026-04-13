@@ -203,11 +203,15 @@ pub fn batch_query(
     #[cfg(feature = "rerank")] reranker: Option<&dyn fastrag_rerank::Reranker>,
 ) -> Vec<BatchQueryResult> {
     use rayon::prelude::*;
-    assert_eq!(
-        embeddings.len(),
-        params.len(),
-        "embeddings and params must be same length"
-    );
+    if embeddings.len() != params.len() {
+        return (0..params.len().max(embeddings.len()))
+            .map(|_| {
+                Err(CorpusError::Embed(
+                    "embeddings and params length mismatch".into(),
+                ))
+            })
+            .collect();
+    }
 
     let has_store = corpus_dir.join("schema.json").exists();
     if !has_store {
@@ -256,7 +260,7 @@ pub fn batch_query(
                 let mut reranked = rr
                     .rerank(&p.text, rerank_input)
                     .map_err(|e| CorpusError::Rerank(e.to_string()))?;
-                reranked.sort_unstable_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
+                reranked.sort_unstable_by(|a, b| b.score.total_cmp(&a.score));
                 reranked.truncate(p.top_k);
                 let hits = reranked
                     .into_iter()
@@ -1461,6 +1465,47 @@ mod batch_query_tests {
             None,
         );
         assert_eq!(results.len(), 0);
+    }
+
+    #[test]
+    fn batch_query_length_mismatch_returns_errors() {
+        let corpus = tempdir().unwrap();
+        // 2 embeddings, 3 params — mismatch must return errors, not panic.
+        let embeddings = vec![vec![1.0_f32], vec![0.0_f32]];
+        let params = vec![
+            BatchQueryParams {
+                text: "q1".into(),
+                top_k: 5,
+                filter: None,
+            },
+            BatchQueryParams {
+                text: "q2".into(),
+                top_k: 5,
+                filter: None,
+            },
+            BatchQueryParams {
+                text: "q3".into(),
+                top_k: 5,
+                filter: None,
+            },
+        ];
+        let results = batch_query(
+            corpus.path(),
+            &embeddings,
+            &params,
+            #[cfg(feature = "rerank")]
+            None,
+        );
+        // max(2, 3) == 3 error entries
+        assert_eq!(results.len(), 3);
+        for r in &results {
+            assert!(r.is_err(), "expected Err for length mismatch, got Ok");
+            let msg = r.as_ref().unwrap_err().to_string();
+            assert!(
+                msg.contains("mismatch"),
+                "error must mention 'mismatch', got: {msg}"
+            );
+        }
     }
 }
 

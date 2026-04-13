@@ -13,6 +13,26 @@ use crate::error::StoreResult;
 use crate::schema::{DynamicSchema, FieldDef, TypedValue};
 use crate::tantivy::TantivyStore;
 
+// ── string interning ─────────────────────────────────────────────────────────
+
+/// Intern a heap-allocated string so that each unique value is leaked at most
+/// once.  Subsequent calls with the same string return the previously-leaked
+/// pointer without allocating.
+fn intern_str(s: String) -> &'static str {
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+    static CACHE: std::sync::OnceLock<Mutex<HashMap<String, &'static str>>> =
+        std::sync::OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut map = cache.lock().unwrap();
+    if let Some(&cached) = map.get(&s) {
+        return cached;
+    }
+    let leaked: &'static str = Box::leak(s.clone().into_boxed_str());
+    map.insert(s, leaked);
+    leaked
+}
+
 // ── public data types ─────────────────────────────────────────────────────────
 
 /// A record to persist: one chunk's worth of data.
@@ -133,7 +153,7 @@ impl Store {
         // Leak the model_id string to satisfy the &'static str constraint on
         // DynEmbedderTrait::model_id(). This allocation lives for the duration
         // of the process but open_no_embedder is called infrequently.
-        let model_id_static: &'static str = Box::leak(identity.model_id.clone().into_boxed_str());
+        let model_id_static: &'static str = intern_str(identity.model_id.clone());
 
         struct ManifestPassthroughEmbedder {
             identity: EmbedderIdentity,
