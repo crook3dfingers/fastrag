@@ -248,9 +248,7 @@ fn chunking_info(strategy: &ManifestChunkingStrategy) -> ChunkingInfo {
             max_characters: Some(*max_characters),
             overlap: Some(*overlap),
         },
-        ManifestChunkingStrategy::Semantic {
-            max_characters, ..
-        } => ChunkingInfo {
+        ManifestChunkingStrategy::Semantic { max_characters, .. } => ChunkingInfo {
             strategy: "semantic".to_string(),
             max_characters: Some(*max_characters),
             overlap: None,

@@ -700,7 +700,10 @@ mod tests {
         let stats = store.field_stats();
         assert_eq!(stats.len(), 2, "expected 2 field stats (severity + cvss)");
 
-        let sev_stat = stats.iter().find(|s| s.name == "severity").expect("severity stat");
+        let sev_stat = stats
+            .iter()
+            .find(|s| s.name == "severity")
+            .expect("severity stat");
         assert!(
             sev_stat.cardinality >= 2,
             "severity cardinality should be >= 2 (HIGH, LOW), got {}",

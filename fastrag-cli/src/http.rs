@@ -730,12 +730,8 @@ async fn stats_handler(
         fastrag::corpus::corpus_stats(&corpus_dir, &corpus_name)
     })
     .await
-    .map_err(|e| {
-        (StatusCode::INTERNAL_SERVER_ERROR, format!("join: {e}")).into_response()
-    })?
-    .map_err(|e| {
-        (StatusCode::INTERNAL_SERVER_ERROR, format!("stats: {e}")).into_response()
-    })?;
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("join: {e}")).into_response())?
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("stats: {e}")).into_response())?;
 
     Ok(Json(serde_json::to_value(stats).unwrap()))
 }

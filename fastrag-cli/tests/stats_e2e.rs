@@ -71,7 +71,10 @@ async fn stats_after_ingest() {
     assert_eq!(json["corpus"], "default");
     assert_eq!(json["entries"]["live"].as_u64().unwrap(), 2);
     assert_eq!(json["entries"]["tombstoned"].as_u64().unwrap(), 0);
-    assert!(json["disk_bytes"].as_u64().unwrap() > 0, "disk_bytes should be > 0");
+    assert!(
+        json["disk_bytes"].as_u64().unwrap() > 0,
+        "disk_bytes should be > 0"
+    );
     assert!(
         json["embedding"]["dimensions"].as_u64().unwrap() > 0,
         "embedding.dimensions should be > 0"
@@ -82,7 +85,9 @@ async fn stats_after_ingest() {
     );
 
     // Verify field stats
-    let fields = json["fields"].as_array().expect("fields should be an array");
+    let fields = json["fields"]
+        .as_array()
+        .expect("fields should be an array");
 
     let severity = fields
         .iter()
