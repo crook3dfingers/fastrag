@@ -1,13 +1,11 @@
 """Tests for async AsyncFastRAGClient."""
 
-import json
-
 import httpx
 import pytest
 import respx
 
 from fastrag_client.async_client import AsyncFastRAGClient
-from fastrag_client.errors import AuthenticationError, NotFoundError
+from fastrag_client.errors import AuthenticationError
 from fastrag_client.filters import F
 from fastrag_client.models import (
     BatchResult,
@@ -28,9 +26,7 @@ from .conftest import (
 
 @respx.mock
 async def test_query_returns_search_hits(base_url: str):
-    respx.get(f"{base_url}/query").mock(
-        return_value=httpx.Response(200, json=[SEARCH_HIT_FIXTURE])
-    )
+    respx.get(f"{base_url}/query").mock(return_value=httpx.Response(200, json=[SEARCH_HIT_FIXTURE]))
     async with AsyncFastRAGClient(base_url=base_url) as client:
         hits = await client.query("SQL injection")
     assert len(hits) == 1
@@ -51,9 +47,7 @@ async def test_query_with_filter(base_url: str):
 
 @respx.mock
 async def test_batch_query_returns_batch_results(base_url: str):
-    respx.post(f"{base_url}/batch-query").mock(
-        return_value=httpx.Response(200, json=BATCH_FIXTURE)
-    )
+    respx.post(f"{base_url}/batch-query").mock(return_value=httpx.Response(200, json=BATCH_FIXTURE))
     async with AsyncFastRAGClient(base_url=base_url) as client:
         results = await client.batch_query([{"q": "SQL injection", "top_k": 3}])
     assert len(results) == 2
@@ -97,9 +91,7 @@ async def test_stats_returns_dict(base_url: str):
 
 @respx.mock
 async def test_corpora_returns_list(base_url: str):
-    respx.get(f"{base_url}/corpora").mock(
-        return_value=httpx.Response(200, json=CORPORA_FIXTURE)
-    )
+    respx.get(f"{base_url}/corpora").mock(return_value=httpx.Response(200, json=CORPORA_FIXTURE))
     async with AsyncFastRAGClient(base_url=base_url) as client:
         result = await client.corpora()
     assert len(result) == 1
@@ -108,9 +100,7 @@ async def test_corpora_returns_list(base_url: str):
 
 @respx.mock
 async def test_health_returns_true(base_url: str):
-    respx.get(f"{base_url}/health").mock(
-        return_value=httpx.Response(200, json={"status": "ok"})
-    )
+    respx.get(f"{base_url}/health").mock(return_value=httpx.Response(200, json={"status": "ok"}))
     async with AsyncFastRAGClient(base_url=base_url) as client:
         assert await client.health() is True
 
@@ -124,9 +114,7 @@ async def test_health_returns_false_on_error(base_url: str):
 
 @respx.mock
 async def test_auth_error_raises(base_url: str):
-    respx.get(f"{base_url}/query").mock(
-        return_value=httpx.Response(401, text="unauthorized")
-    )
+    respx.get(f"{base_url}/query").mock(return_value=httpx.Response(401, text="unauthorized"))
     async with AsyncFastRAGClient(base_url=base_url) as client:
         with pytest.raises(AuthenticationError):
             await client.query("test")
@@ -134,9 +122,7 @@ async def test_auth_error_raises(base_url: str):
 
 @respx.mock
 async def test_token_header_sent(base_url: str):
-    route = respx.get(f"{base_url}/query").mock(
-        return_value=httpx.Response(200, json=[])
-    )
+    route = respx.get(f"{base_url}/query").mock(return_value=httpx.Response(200, json=[]))
     async with AsyncFastRAGClient(base_url=base_url, token="secret") as client:
         await client.query("test")
     assert route.calls[0].request.headers["x-fastrag-token"] == "secret"
@@ -144,9 +130,7 @@ async def test_token_header_sent(base_url: str):
 
 @respx.mock
 async def test_tenant_header_sent(base_url: str):
-    route = respx.get(f"{base_url}/query").mock(
-        return_value=httpx.Response(200, json=[])
-    )
+    route = respx.get(f"{base_url}/query").mock(return_value=httpx.Response(200, json=[]))
     async with AsyncFastRAGClient(base_url=base_url, tenant_id="acme") as client:
         await client.query("test")
     assert route.calls[0].request.headers["x-fastrag-tenant"] == "acme"
