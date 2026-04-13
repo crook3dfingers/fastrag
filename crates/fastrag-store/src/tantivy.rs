@@ -41,6 +41,21 @@ pub struct UserFieldHandle {
     pub typed: TypedKind,
 }
 
+/// Per-field statistics computed from Tantivy fast-field columns.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldStat {
+    pub name: String,
+    pub field_type: FieldStatType,
+    pub cardinality: u64,
+}
+
+/// Type-specific stat payload.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FieldStatType {
+    Text,
+    Numeric { min: f64, max: f64 },
+}
+
 /// Tantivy index wrapper with dynamic schema support.
 pub struct TantivyStore {
     index: Index,
@@ -354,6 +369,80 @@ impl TantivyStore {
         }
         Ok(results)
     }
+
+    /// Compute per-field statistics from Tantivy fast-field columns.
+    ///
+    /// Only `String` (non-tokenized/FAST) and `Numeric` fields are included.
+    /// `Bool`, `Date`, and `Array` fields are skipped.
+    pub fn field_stats(&self) -> Vec<FieldStat> {
+        let searcher = self.reader.searcher();
+        let mut stats = Vec::new();
+
+        for handle in &self.user_fields {
+            match handle.typed {
+                TypedKind::String => {
+                    // Only non-tokenized STRING fields have FAST flag;
+                    // tokenized (positions=true) fields won't have a str column.
+                    let mut cardinality: u64 = 0;
+                    for seg_reader in searcher.segment_readers() {
+                        if let Ok(Some(str_col)) = seg_reader.fast_fields().str(&handle.name) {
+                            cardinality += str_col.num_terms() as u64;
+                        }
+                    }
+                    stats.push(FieldStat {
+                        name: handle.name.clone(),
+                        field_type: FieldStatType::Text,
+                        cardinality,
+                    });
+                }
+                TypedKind::Numeric => {
+                    let mut global_min = f64::INFINITY;
+                    let mut global_max = f64::NEG_INFINITY;
+                    let mut distinct = std::collections::BTreeSet::<u64>::new();
+                    let mut has_values = false;
+
+                    for seg_reader in searcher.segment_readers() {
+                        if let Ok(Some(col)) =
+                            seg_reader.fast_fields().column_opt::<f64>(&handle.name)
+                        {
+                            let seg_min = col.min_value();
+                            let seg_max = col.max_value();
+                            if seg_min <= seg_max {
+                                has_values = true;
+                                if seg_min < global_min {
+                                    global_min = seg_min;
+                                }
+                                if seg_max > global_max {
+                                    global_max = seg_max;
+                                }
+                            }
+                            for doc_id in 0..seg_reader.max_doc() {
+                                for val in col.values_for_doc(doc_id) {
+                                    distinct.insert(val.to_bits());
+                                }
+                            }
+                        }
+                    }
+
+                    let (min, max) = if has_values {
+                        (global_min, global_max)
+                    } else {
+                        (0.0, 0.0)
+                    };
+
+                    stats.push(FieldStat {
+                        name: handle.name.clone(),
+                        field_type: FieldStatType::Numeric { min, max },
+                        cardinality: distinct.len() as u64,
+                    });
+                }
+                // Skip Bool, Date, Array fields.
+                _ => {}
+            }
+        }
+
+        stats
+    }
 }
 
 // ── tests ────────────────────────────────────────────────────────────────────
@@ -559,6 +648,109 @@ mod tests {
                 TypedValue::String("network".to_string()),
             ])
         );
+    }
+
+    // ── test: field_stats ────────────────────────────────────────────────────
+
+    #[test]
+    fn field_stats_returns_cardinality_and_range() {
+        let dir = TempDir::new().unwrap();
+        let mut dyn_schema = DynamicSchema::new();
+        dyn_schema
+            .merge(FieldDef {
+                name: "severity".to_string(),
+                typed: TypedKind::String,
+                indexed: true,
+                stored: true,
+                positions: false,
+            })
+            .unwrap();
+        dyn_schema
+            .merge(FieldDef {
+                name: "cvss".to_string(),
+                typed: TypedKind::Numeric,
+                indexed: true,
+                stored: true,
+                positions: false,
+            })
+            .unwrap();
+
+        let store = TantivyStore::create(dir.path(), &dyn_schema).unwrap();
+        let core = store.core();
+        let sev = store.user_field("severity").unwrap().field;
+        let cvss = store.user_field("cvss").unwrap().field;
+
+        let mut writer = store.writer().unwrap();
+        for (id, severity, score) in [(1u64, "HIGH", 9.8), (2, "LOW", 3.1), (3, "HIGH", 7.5)] {
+            let mut doc = TantivyDocument::default();
+            doc.add_u64(core.id, id);
+            doc.add_text(core.external_id, format!("doc-{id}"));
+            doc.add_text(core.content_hash, "hash");
+            doc.add_u64(core.chunk_index, 0);
+            doc.add_text(core.source_path, "/test.txt");
+            doc.add_text(core.source, "{}");
+            doc.add_text(core.chunk_text, "test");
+            doc.add_text(sev, severity);
+            doc.add_f64(cvss, score);
+            writer.add_document(doc).unwrap();
+        }
+        writer.commit().unwrap();
+        store.reload().unwrap();
+
+        let stats = store.field_stats();
+        assert_eq!(stats.len(), 2, "expected 2 field stats (severity + cvss)");
+
+        let sev_stat = stats.iter().find(|s| s.name == "severity").expect("severity stat");
+        assert!(
+            sev_stat.cardinality >= 2,
+            "severity cardinality should be >= 2 (HIGH, LOW), got {}",
+            sev_stat.cardinality
+        );
+        assert_eq!(sev_stat.field_type, FieldStatType::Text);
+
+        let cvss_stat = stats.iter().find(|s| s.name == "cvss").expect("cvss stat");
+        assert!(
+            cvss_stat.cardinality >= 3,
+            "cvss cardinality should be >= 3, got {}",
+            cvss_stat.cardinality
+        );
+        match &cvss_stat.field_type {
+            FieldStatType::Numeric { min, max } => {
+                assert!(
+                    (*min - 3.1).abs() < 0.01,
+                    "cvss min should be ~3.1, got {min}"
+                );
+                assert!(
+                    (*max - 9.8).abs() < 0.01,
+                    "cvss max should be ~9.8, got {max}"
+                );
+            }
+            other => panic!("expected Numeric stat for cvss, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn field_stats_empty_index() {
+        let dir = TempDir::new().unwrap();
+        let mut dyn_schema = DynamicSchema::new();
+        dyn_schema
+            .merge(FieldDef {
+                name: "severity".to_string(),
+                typed: TypedKind::String,
+                indexed: true,
+                stored: true,
+                positions: false,
+            })
+            .unwrap();
+
+        let store = TantivyStore::create(dir.path(), &dyn_schema).unwrap();
+
+        let stats = store.field_stats();
+        assert_eq!(stats.len(), 1);
+        let sev_stat = &stats[0];
+        assert_eq!(sev_stat.name, "severity");
+        assert_eq!(sev_stat.cardinality, 0);
+        assert_eq!(sev_stat.field_type, FieldStatType::Text);
     }
 
     // ── test 3 ───────────────────────────────────────────────────────────────
