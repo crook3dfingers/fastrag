@@ -136,6 +136,14 @@ fn tokenize(input: &str) -> Result<Vec<Token>, FilterParseError> {
                 text: word,
                 pos: start,
             });
+        } else {
+            // Unrecognized character that was not consumed by any branch above
+            // (e.g. a bare `!` not followed by `=`). Return a parse error rather
+            // than looping infinitely.
+            return Err(FilterParseError::Unexpected {
+                pos: start,
+                message: format!("unexpected character '{}'", chars[i]),
+            });
         }
     }
 

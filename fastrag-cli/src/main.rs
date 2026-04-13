@@ -657,6 +657,7 @@ async fn main() {
             no_rerank,
             #[cfg(feature = "rerank")]
             rerank_over_fetch,
+            batch_max_queries,
         } => {
             let token = token.or_else(|| std::env::var("FASTRAG_TOKEN").ok());
             let opts = embed_loader::EmbedderOptions {
@@ -687,9 +688,16 @@ async fn main() {
                 rerank_cfg.over_fetch = rerank_over_fetch;
             }
 
-            if let Err(e) =
-                fastrag_cli::http::serve_http(corpus, port, embedder, token, dense_only, rerank_cfg)
-                    .await
+            if let Err(e) = fastrag_cli::http::serve_http(
+                corpus,
+                port,
+                embedder,
+                token,
+                dense_only,
+                rerank_cfg,
+                batch_max_queries,
+            )
+            .await
             {
                 eprintln!("Error starting HTTP server: {e}");
                 std::process::exit(1);

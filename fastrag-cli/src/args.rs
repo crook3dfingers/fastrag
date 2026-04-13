@@ -525,6 +525,10 @@ pub enum Command {
         #[cfg(feature = "rerank")]
         #[arg(long, default_value_t = 10)]
         rerank_over_fetch: usize,
+
+        /// Maximum number of queries allowed in a single /batch-query request.
+        #[arg(long, default_value_t = 100)]
+        batch_max_queries: usize,
     },
 
     /// Delete a record by external ID from a store-backed corpus

@@ -23,6 +23,7 @@ struct AppState {
     embedder: DynEmbedder,
     metrics: PrometheusHandle,
     dense_only: bool,
+    batch_max_queries: usize,
     #[cfg(feature = "rerank")]
     reranker: Option<std::sync::Arc<dyn fastrag_rerank::Reranker>>,
     #[cfg(feature = "rerank")]
@@ -104,6 +105,39 @@ fn default_top_k() -> usize {
     5
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct BatchQueryRequest {
+    queries: Vec<BatchQueryItem>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct BatchQueryItem {
+    q: String,
+    #[serde(default = "default_top_k")]
+    top_k: usize,
+    /// Accepts either string syntax ("severity = HIGH") or JSON AST (FilterExpr).
+    #[serde(default)]
+    filter: Option<serde_json::Value>,
+    /// Reserved for federation (Phase B). Ignored for now.
+    #[serde(default)]
+    #[allow(dead_code)]
+    corpus: Option<String>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct BatchQueryResponse {
+    results: Vec<BatchResultItem>,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct BatchResultItem {
+    index: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hits: Option<Vec<fastrag::corpus::SearchHitDto>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
 #[derive(Debug, Error)]
 pub enum HttpError {
     #[error("I/O error: {0}")]
@@ -145,10 +179,17 @@ pub async fn serve_http(
     token: Option<String>,
     dense_only: bool,
     rerank_cfg: HttpRerankerConfig,
+    batch_max_queries: usize,
 ) -> Result<(), HttpError> {
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
     serve_http_with_embedder(
-        corpus_dir, listener, embedder, token, dense_only, rerank_cfg,
+        corpus_dir,
+        listener,
+        embedder,
+        token,
+        dense_only,
+        rerank_cfg,
+        batch_max_queries,
     )
     .await
 }
@@ -160,6 +201,7 @@ pub async fn serve_http_with_embedder(
     token: Option<String>,
     dense_only: bool,
     rerank_cfg: HttpRerankerConfig,
+    batch_max_queries: usize,
 ) -> Result<(), HttpError> {
     // The `metrics` crate allows exactly one global recorder per process, but in
     // test binaries multiple serve_http_with_embedder calls share one process.
@@ -204,6 +246,7 @@ pub async fn serve_http_with_embedder(
         embedder,
         metrics,
         dense_only,
+        batch_max_queries,
         #[cfg(feature = "rerank")]
         reranker: rerank_cfg.reranker,
         #[cfg(feature = "rerank")]
@@ -213,6 +256,7 @@ pub async fn serve_http_with_embedder(
     // /health stays unauthenticated for liveness probes.
     let protected = Router::new()
         .route("/query", get(query))
+        .route("/batch-query", axum::routing::post(batch_query_handler))
         .route("/metrics", get(metrics_handler))
         .route_layer(middleware::from_fn_with_state(
             auth_state.clone(),
@@ -271,6 +315,119 @@ fn run_query(
         filter,
         &mut fastrag::corpus::LatencyBreakdown::default(),
     )
+}
+
+async fn batch_query_handler(
+    State(state): State<AppState>,
+    Json(req): Json<BatchQueryRequest>,
+) -> Result<Json<BatchQueryResponse>, Response> {
+    use fastrag_embed::QueryText;
+
+    if req.queries.len() > state.batch_max_queries {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "batch size {} exceeds limit {}",
+                req.queries.len(),
+                state.batch_max_queries
+            ),
+        )
+            .into_response());
+    }
+
+    // Parse all filters up front. Track per-query filter parse errors.
+    let mut filter_errors: Vec<Option<String>> = vec![None; req.queries.len()];
+    let mut filter_exprs: Vec<Option<fastrag::filter::FilterExpr>> =
+        Vec::with_capacity(req.queries.len());
+
+    for (i, item) in req.queries.iter().enumerate() {
+        match &item.filter {
+            None => filter_exprs.push(None),
+            Some(serde_json::Value::String(s)) => match fastrag::filter::parse(s) {
+                Ok(f) => filter_exprs.push(Some(f)),
+                Err(e) => {
+                    filter_exprs.push(None);
+                    filter_errors[i] = Some(format!("bad filter: {e}"));
+                }
+            },
+            Some(json_val) => match serde_json::from_value(json_val.clone()) {
+                Ok(f) => filter_exprs.push(Some(f)),
+                Err(e) => {
+                    filter_exprs.push(None);
+                    filter_errors[i] = Some(format!("bad filter: {e}"));
+                }
+            },
+        }
+    }
+
+    // Embed all query texts in a single call.
+    let texts: Vec<QueryText> = req
+        .queries
+        .iter()
+        .map(|item| QueryText::new(&item.q))
+        .collect();
+
+    let embeddings =
+        match (state.embedder.as_ref() as &dyn fastrag::DynEmbedderTrait).embed_query_dyn(&texts) {
+            Ok(vecs) => vecs,
+            Err(e) => {
+                return Err(
+                    (StatusCode::SERVICE_UNAVAILABLE, format!("embed error: {e}")).into_response(),
+                );
+            }
+        };
+
+    // Build per-query params.
+    let params: Vec<fastrag::corpus::BatchQueryParams> = req
+        .queries
+        .iter()
+        .zip(filter_exprs.into_iter())
+        .map(|(item, f)| fastrag::corpus::BatchQueryParams {
+            text: item.q.clone(),
+            top_k: item.top_k,
+            filter: f,
+        })
+        .collect();
+
+    // Run batch retrieval.
+    #[cfg(feature = "rerank")]
+    let raw_results = fastrag::corpus::batch_query(
+        &state.corpus_dir,
+        &embeddings,
+        &params,
+        state.reranker.as_deref(),
+    );
+    #[cfg(not(feature = "rerank"))]
+    let raw_results = fastrag::corpus::batch_query(&state.corpus_dir, &embeddings, &params);
+
+    // Merge filter parse errors with retrieval results.
+    let results: Vec<BatchResultItem> = raw_results
+        .into_iter()
+        .enumerate()
+        .map(|(i, result)| {
+            if let Some(ref err) = filter_errors[i] {
+                return BatchResultItem {
+                    index: i,
+                    hits: None,
+                    error: Some(err.clone()),
+                };
+            }
+            match result {
+                Ok(hits) => BatchResultItem {
+                    index: i,
+                    hits: Some(hits),
+                    error: None,
+                },
+                Err(e) => BatchResultItem {
+                    index: i,
+                    hits: None,
+                    error: Some(e.to_string()),
+                },
+            }
+        })
+        .collect();
+
+    Ok(Json(BatchQueryResponse { results }))
 }
 
 async fn query(

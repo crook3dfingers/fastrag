@@ -57,6 +57,7 @@ async fn http_query_and_health_end_to_end() {
                 None,
                 false,
                 HttpRerankerConfig::default(),
+                100,
             )
             .await;
         }
@@ -161,6 +162,7 @@ async fn spawn_server_with_token(
                 token,
                 false,
                 HttpRerankerConfig::default(),
+                100,
             )
             .await;
         }
