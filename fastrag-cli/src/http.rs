@@ -38,7 +38,6 @@ struct AppState {
     batch_max_queries: usize,
     tenant_field: Option<String>,
     ingest_locks: IngestLocks,
-    #[allow(dead_code)] // used by POST /ingest handler (Task 2)
     ingest_max_body: usize,
     #[cfg(feature = "rerank")]
     reranker: Option<std::sync::Arc<dyn fastrag_rerank::Reranker>>,
@@ -622,7 +621,7 @@ async fn ingest_handler(
     Ok(Json(IngestResponse {
         corpus: params.corpus,
         records_new: stats.records_new,
-        records_updated: stats.records_upserted.saturating_sub(stats.records_new),
+        records_updated: stats.records_upserted,
         records_unchanged: stats.records_skipped,
         chunks_added: stats.chunks_created,
     }))

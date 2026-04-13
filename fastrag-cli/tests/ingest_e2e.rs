@@ -54,14 +54,15 @@ async fn ingest_creates_queryable_records() {
         .await
         .unwrap();
 
+    assert_eq!(resp.status(), 200);
+    let first_json: serde_json::Value = resp.json().await.unwrap();
     assert_eq!(
-        resp.status(),
-        200,
-        "ingest response: {:?}",
-        resp.text().await
+        first_json["records_new"].as_u64().unwrap(),
+        2,
+        "first ingest should create 2 new records: {first_json}"
     );
 
-    // Re-send to get the parsed body
+    // Re-send identical payload — should be fully deduplicated
     let resp = client
         .post(format!(
             "http://{}/ingest?id_field=id&text_fields=body&metadata_fields=severity",
@@ -73,12 +74,17 @@ async fn ingest_creates_queryable_records() {
         .await
         .unwrap();
 
-    let ingest_json: serde_json::Value = resp.json().await.unwrap();
-    // First ingest should have created records; second should show unchanged
-    assert!(
-        ingest_json["records_unchanged"].as_u64().unwrap_or(0) >= 2
-            || ingest_json["records_new"].as_u64().unwrap_or(0) >= 2,
-        "expected records processed: {ingest_json}"
+    assert_eq!(resp.status(), 200);
+    let second_json: serde_json::Value = resp.json().await.unwrap();
+    assert_eq!(
+        second_json["records_unchanged"].as_u64().unwrap(),
+        2,
+        "second ingest should show 2 unchanged records: {second_json}"
+    );
+    assert_eq!(
+        second_json["records_new"].as_u64().unwrap(),
+        0,
+        "second ingest should show 0 new records: {second_json}"
     );
 
     // Query the corpus — should find at least one hit for "SQL injection"
