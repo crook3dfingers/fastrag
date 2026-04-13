@@ -1,25 +1,49 @@
 //! Integration tests for multi-corpus federation.
 
 use fastrag::corpus::CorpusRegistry;
+use fastrag::ingest::engine::index_jsonl;
+use fastrag::ingest::jsonl::JsonlIngestConfig;
 use fastrag_cli::http::{HttpRerankerConfig, serve_http_with_registry};
 use fastrag_embed::test_utils::MockEmbedder;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
+/// Build a Store-backed toy corpus via JSONL ingest.
+///
+/// The single document has NO `engagement_id` metadata field, so a tenant
+/// filter `engagement_id = <anything>` returns 0 hits — exercising the
+/// semantic filter path that `query_corpus_with_filter` applies only when a
+/// `schema.json` (Store) is present.
 fn toy_corpus() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
-    let doc_path = dir.path().join("doc.txt");
-    std::fs::write(&doc_path, "SQL injection vulnerability").unwrap();
-    fastrag::corpus::index_path(
-        &doc_path,
-        dir.path(),
+    let jsonl_path = dir.path().join("docs.jsonl");
+    // One record: id + body only, no engagement_id.
+    std::fs::write(
+        &jsonl_path,
+        r#"{"id":"doc-1","body":"SQL injection vulnerability"}"#,
+    )
+    .unwrap();
+
+    let corpus_dir = tempfile::tempdir().unwrap();
+    let config = JsonlIngestConfig {
+        text_fields: vec!["body".to_string()],
+        id_field: "id".to_string(),
+        metadata_fields: vec![],
+        metadata_types: BTreeMap::new(),
+        array_fields: vec![],
+    };
+    index_jsonl(
+        &jsonl_path,
+        corpus_dir.path(),
         &fastrag::ChunkingStrategy::Basic {
             max_characters: 1000,
             overlap: 0,
         },
         &MockEmbedder,
+        &config,
     )
     .unwrap();
-    dir
+    corpus_dir
 }
 
 #[tokio::test]
@@ -198,4 +222,14 @@ async fn tenant_enforcement_rejects_missing_header() {
         .await
         .unwrap();
     assert_eq!(resp.status(), 200);
+    let hits: serde_json::Value = resp.json().await.unwrap();
+    let hits_arr = hits.as_array().expect("response should be an array");
+    // Tenant filter `engagement_id = engagement-abc` is applied; the toy corpus
+    // has no engagement_id metadata, so the filter returns 0 hits.
+    // If the filter were not applied, the "SQL injection vulnerability" doc would appear.
+    assert_eq!(
+        hits_arr.len(),
+        0,
+        "tenant filter should exclude all toy corpus docs"
+    );
 }

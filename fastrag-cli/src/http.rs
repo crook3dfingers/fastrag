@@ -355,6 +355,9 @@ pub async fn serve_http_with_registry(
             axum::routing::post(batch_query_handler).layer(DefaultBodyLimit::max(10 * 1024 * 1024)), // 10 MB
         )
         .route("/metrics", get(metrics_handler))
+        // /corpora is inside the protected router intentionally: when tenant_field is set,
+        // listing corpora requires the X-Fastrag-Tenant header. This prevents corpus
+        // enumeration without tenant credentials.
         .route("/corpora", get(list_corpora))
         .route_layer(middleware::from_fn_with_state(
             app_state.clone(),
