@@ -13,11 +13,13 @@ use super::common::{cache_root, download_to_path, file_name_from_url, read_gz_js
 const NVD_2023_URL: &str = "https://nvd.nist.gov/feeds/json/cve/2.0/nvdcve-2.0-2023.json.gz";
 const NVD_2024_URL: &str = "https://nvd.nist.gov/feeds/json/cve/2.0/nvdcve-2.0-2024.json.gz";
 
+const BUNDLED_SECURITY_QUERIES: &str = include_str!("security_queries.json");
+
 pub fn load_nvd() -> EvalResult<EvalDataset> {
     let root = cache_root("nvd")?;
     let feed_2023 = ensure_nvd_feed(&root, NVD_2023_URL)?;
     let feed_2024 = ensure_nvd_feed(&root, NVD_2024_URL)?;
-    load_nvd_from_corpus_paths("nvd", &[feed_2023, feed_2024])
+    load_nvd_from_corpus_paths_with_bundled_queries("nvd", &[feed_2023, feed_2024])
 }
 
 pub fn load_nvd_corpus_with_queries(
@@ -87,16 +89,48 @@ pub fn load_nvd_corpus_with_queries(
     })
 }
 
-fn load_nvd_from_corpus_paths(name: &str, paths: &[PathBuf]) -> EvalResult<EvalDataset> {
+fn load_nvd_from_corpus_paths_with_bundled_queries(
+    name: &str,
+    paths: &[PathBuf],
+) -> EvalResult<EvalDataset> {
     let mut documents = Vec::new();
     for path in paths {
         documents.extend(load_nvd_documents(path)?);
     }
+
+    let query_file: SecurityQueriesFile = serde_json::from_str(BUNDLED_SECURITY_QUERIES)
+        .map_err(|e| EvalError::MalformedDataset(format!("bundled security_queries.json: {e}")))?;
+
+    let corpus_ids: HashSet<String> = documents.iter().map(|d| d.id.clone()).collect();
+    let mut queries = Vec::with_capacity(query_file.queries.len());
+    for q in &query_file.queries {
+        queries.push(EvalQuery {
+            id: q.id.clone(),
+            text: q.text.clone(),
+        });
+    }
+
+    // Bundled qrels reference CVEs across both feed years; skip any not in this corpus slice.
+    let mut qrels = Vec::new();
+    for qrel in &query_file.qrels {
+        if corpus_ids.contains(&qrel.doc_id) {
+            qrels.push(Qrel {
+                query_id: qrel.query_id.clone(),
+                doc_id: qrel.doc_id.clone(),
+                relevance: qrel.relevance,
+            });
+        }
+    }
+
+    // Drop queries that have no matching qrels (corpus doesn't contain their target docs)
+    let active_query_ids: HashSet<&str> = qrels.iter().map(|q| q.query_id.as_str()).collect();
+    queries.retain(|q| active_query_ids.contains(q.id.as_str()));
+
     Ok(EvalDataset {
         name: name.to_string(),
         documents,
-        queries: Vec::new(),
-        qrels: Vec::new(),
+        queries,
+        qrels,
     })
 }
 
@@ -284,5 +318,14 @@ mod tests {
 
         let err = load_nvd_corpus_with_queries(&fixture_path(), &queries_path).unwrap_err();
         assert!(err.to_string().contains("missing query id"));
+    }
+
+    #[test]
+    fn load_nvd_includes_bundled_queries() {
+        let dataset =
+            load_nvd_from_corpus_paths_with_bundled_queries("nvd-test", &[fixture_path()]).unwrap();
+        assert_eq!(dataset.queries.len(), 10);
+        assert_eq!(dataset.qrels.len(), 10);
+        assert!(dataset.queries.iter().any(|q| q.id == "nvd-q01"));
     }
 }

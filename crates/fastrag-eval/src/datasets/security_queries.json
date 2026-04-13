@@ -1,0 +1,26 @@
+{
+  "queries": [
+    {"id": "nvd-q01", "text": "What is CVE-2023-11111?"},
+    {"id": "nvd-q02", "text": "buffer overflow remote code execution in parser"},
+    {"id": "nvd-q03", "text": "JWT token verification bypass"},
+    {"id": "nvd-q04", "text": "What is CVE-2023-33333?"},
+    {"id": "nvd-q05", "text": "cache poisoning vulnerability"},
+    {"id": "nvd-q06", "text": "path traversal file overwrite upload"},
+    {"id": "nvd-q07", "text": "What is CVE-2023-55555?"},
+    {"id": "nvd-q08", "text": "administrative dashboard authorization bypass"},
+    {"id": "nvd-q09", "text": "remote code execution vulnerabilities 2023"},
+    {"id": "nvd-q10", "text": "web application input validation flaws"}
+  ],
+  "qrels": [
+    {"query_id": "nvd-q01", "doc_id": "CVE-2023-11111", "relevance": 2},
+    {"query_id": "nvd-q02", "doc_id": "CVE-2023-11111", "relevance": 2},
+    {"query_id": "nvd-q03", "doc_id": "CVE-2023-22222", "relevance": 2},
+    {"query_id": "nvd-q04", "doc_id": "CVE-2023-33333", "relevance": 2},
+    {"query_id": "nvd-q05", "doc_id": "CVE-2023-33333", "relevance": 2},
+    {"query_id": "nvd-q06", "doc_id": "CVE-2023-44444", "relevance": 2},
+    {"query_id": "nvd-q07", "doc_id": "CVE-2023-55555", "relevance": 2},
+    {"query_id": "nvd-q08", "doc_id": "CVE-2023-55555", "relevance": 2},
+    {"query_id": "nvd-q09", "doc_id": "CVE-2023-11111", "relevance": 1},
+    {"query_id": "nvd-q10", "doc_id": "CVE-2023-44444", "relevance": 1}
+  ]
+}
