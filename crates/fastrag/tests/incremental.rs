@@ -1,3 +1,5 @@
+#![cfg(feature = "retrieval")]
+
 use fastrag::ChunkingStrategy;
 use fastrag::corpus::{CorpusIndexStats, LatencyBreakdown, index_path, query_corpus};
 use fastrag_embed::test_utils::MockEmbedder;
