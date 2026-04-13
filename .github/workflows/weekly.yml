@@ -90,7 +90,7 @@ jobs:
       - name: Build contextualized corpus
         run: |
           cargo run --release -p fastrag-cli --bin fastrag \
-            --features retrieval,rerank,hybrid,contextual,contextual-llama -- \
+            --features retrieval,rerank,contextual,contextual-llama -- \
             index tests/gold/corpus \
             --corpus eval-corpus/ctx \
             --embedder qwen3-q8 \
@@ -99,7 +99,7 @@ jobs:
       - name: Build raw corpus
         run: |
           cargo run --release -p fastrag-cli --bin fastrag \
-            --features retrieval,rerank,hybrid,contextual,contextual-llama -- \
+            --features retrieval,rerank,contextual,contextual-llama -- \
             index tests/gold/corpus \
             --corpus eval-corpus/raw \
             --embedder qwen3-q8
@@ -120,7 +120,7 @@ jobs:
             echo "No baseline committed yet — running without regression gate."
           fi
           cargo run --release -p fastrag-cli --bin fastrag \
-            --features eval,retrieval,rerank,rerank-llama,hybrid,contextual,contextual-llama -- \
+            --features eval,retrieval,rerank,rerank-llama,contextual,contextual-llama -- \
             eval \
             --gold-set tests/gold/questions.json \
             --corpus eval-corpus/ctx \

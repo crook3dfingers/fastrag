@@ -92,7 +92,7 @@ jobs:
         if: steps.corpus_cache.outputs.cache-hit == 'true' && steps.waiver.outputs.waived != 'true'
         run: |
           cargo run --release -p fastrag-cli --bin fastrag \
-            --features eval,retrieval,rerank,rerank-llama,hybrid,contextual,contextual-llama -- \
+            --features eval,retrieval,rerank,rerank-llama,contextual,contextual-llama -- \
             eval \
             --gold-set tests/gold/questions.json \
             --corpus eval-corpus/ctx \

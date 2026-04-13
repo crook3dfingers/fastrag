@@ -33,7 +33,7 @@ for strategy in "${STRATEGIES[@]}"; do
 
       # Build contextualized corpus
       cargo run --release -p fastrag-cli --bin fastrag \
-        --features retrieval,rerank,hybrid,contextual,contextual-llama -- \
+        --features retrieval,rerank,contextual,contextual-llama -- \
         index "$GOLD_CORPUS" \
         --corpus "$CTX_DIR" \
         --embedder qwen3-q8 \
@@ -45,7 +45,7 @@ for strategy in "${STRATEGIES[@]}"; do
 
       # Build raw corpus
       cargo run --release -p fastrag-cli --bin fastrag \
-        --features retrieval,rerank,hybrid,contextual,contextual-llama -- \
+        --features retrieval,rerank,contextual,contextual-llama -- \
         index "$GOLD_CORPUS" \
         --corpus "$RAW_DIR" \
         --embedder qwen3-q8 \
@@ -57,7 +57,7 @@ for strategy in "${STRATEGIES[@]}"; do
       # Run eval matrix
       REPORT="$OUT_DIR/report-${strategy}-${size}-${overlap}.json"
       cargo run --release -p fastrag-cli --bin fastrag \
-        --features eval,retrieval,rerank,rerank-llama,hybrid,contextual,contextual-llama -- \
+        --features eval,retrieval,rerank,rerank-llama,contextual,contextual-llama -- \
         eval \
         --gold-set "$GOLD_SET" \
         --corpus "$CTX_DIR" \
