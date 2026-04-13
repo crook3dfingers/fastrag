@@ -95,6 +95,9 @@ pub enum CorpusError {
     #[cfg(feature = "rerank")]
     #[error("reranker error: {0}")]
     Rerank(String),
+    #[cfg(feature = "store")]
+    #[error("store error: {0}")]
+    Store(#[from] fastrag_store::error::StoreError),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -151,6 +154,9 @@ pub struct SearchHitDto {
     pub pages: Vec<usize>,
     pub element_kinds: Vec<ElementKind>,
     pub language: Option<String>,
+    #[cfg(feature = "store")]
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub metadata: std::collections::BTreeMap<String, fastrag_store::schema::TypedValue>,
 }
 
 impl From<VectorHit> for SearchHitDto {
@@ -164,6 +170,8 @@ impl From<VectorHit> for SearchHitDto {
             pages: Vec::new(),
             element_kinds: Vec::new(),
             language: None,
+            #[cfg(feature = "store")]
+            metadata: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -474,47 +482,43 @@ pub fn query_corpus(
     embedder: &dyn DynEmbedderTrait,
     breakdown: &mut LatencyBreakdown,
 ) -> Result<Vec<SearchHitDto>, CorpusError> {
-    query_corpus_with_filter(
-        corpus_dir,
-        query,
-        top_k,
-        embedder,
-        &std::collections::BTreeMap::new(),
-        breakdown,
-    )
+    query_corpus_with_filter(corpus_dir, query, top_k, embedder, None, breakdown)
 }
 
-/// Two-stage filtered retrieval: HNSW returns `top_k * over_fetch` candidates,
-/// an equality filter is applied, and the top-k survivors are returned.
+/// Two-stage filtered retrieval: HNSW returns candidates, an expression
+/// filter is applied against each candidate's metadata, and the top-k
+/// survivors are returned.
 ///
-/// The over-fetch factor starts at 4×; if the filter eliminates every hit, the
-/// search is retried once with 16× over-fetch before giving up and returning
-/// an empty vec. An empty filter short-circuits the retry loop.
-/// Two-stage filtered retrieval: HNSW returns `top_k * over_fetch` candidates,
-/// an equality filter is applied, and the top-k survivors are returned.
+/// When `filter` is `None` the function behaves identically to the unfiltered
+/// path: query the Store for `top_k` dense hits and return them directly.
 ///
-/// The over-fetch factor starts at 4×; if the filter eliminates every hit, the
-/// search is retried once with 16× over-fetch before giving up and returning
-/// an empty vec. An empty filter short-circuits the retry loop.
+/// When `filter` is `Some`, adaptive overfetch kicks in: the HNSW index is
+/// queried at 4×, 16×, then 32× `top_k`. At each tier, metadata is fetched
+/// and the filter expression is evaluated via [`crate::filter::matches`].
+/// As soon as `top_k` candidates survive, the function returns. If fewer
+/// than `top_k` survive after 32×, whatever matched is returned.
 ///
 /// `breakdown` is populated with embed + HNSW timing. `embed_us` is always
 /// recorded on the first (and only) embed call. `hnsw_us` records the timing
-/// of the HNSW call that ultimately returns results (first non-empty iteration,
-/// or the final iteration). `bm25_us`, `fuse_us`, and `rerank_us` are left at
-/// zero. Call `breakdown.finalize()` is called before every return path.
+/// of the HNSW search that produced the final result set. `bm25_us`,
+/// `fuse_us`, and `rerank_us` are left at zero. `breakdown.finalize()` is
+/// called before every return path.
 pub fn query_corpus_with_filter(
     corpus_dir: &Path,
     query: &str,
     top_k: usize,
     embedder: &dyn DynEmbedderTrait,
-    _filter: &std::collections::BTreeMap<String, String>,
+    filter: Option<&crate::filter::FilterExpr>,
     breakdown: &mut LatencyBreakdown,
 ) -> Result<Vec<SearchHitDto>, CorpusError> {
     use fastrag_embed::QueryText;
     use std::time::Instant;
 
-    let index = HnswIndex::load(corpus_dir, embedder)?;
+    // Detect whether this is a Store-managed corpus (has schema.json) or a
+    // legacy HNSW-only corpus.
+    let has_store = corpus_dir.join("schema.json").exists();
 
+    // Embed the query vector (common to both paths).
     let t = Instant::now();
     let vector = embedder
         .embed_query_dyn(&[QueryText::new(query)])
@@ -524,13 +528,120 @@ pub fn query_corpus_with_filter(
         .ok_or(CorpusError::EmptyEmbeddingOutput)?;
     breakdown.embed_us = t.elapsed().as_micros() as u64;
 
-    let t = Instant::now();
-    let result = index.query(&vector, top_k)?;
-    breakdown.hnsw_us = t.elapsed().as_micros() as u64;
-    breakdown.finalize();
+    // ── Legacy path: no Store, no filtering ──────────────────────────────
+    if !has_store {
+        let index = HnswIndex::load(corpus_dir, embedder)?;
+        let t = Instant::now();
+        let result = index.query(&vector, top_k)?;
+        breakdown.hnsw_us = t.elapsed().as_micros() as u64;
+        breakdown.finalize();
+        return Ok(result.into_iter().map(SearchHitDto::from).collect());
+    }
 
-    // TODO: filtering requires Store migration — filter arg is accepted but ignored
-    Ok(result.into_iter().map(SearchHitDto::from).collect())
+    // ── Store path ───────────────────────────────────────────────────────
+    let store = fastrag_store::Store::open(corpus_dir, embedder)?;
+
+    // Unfiltered: query Store for top_k dense hits and return.
+    if filter.is_none() {
+        let t = Instant::now();
+        let scored = store.query_dense(&vector, top_k)?;
+        breakdown.hnsw_us = t.elapsed().as_micros() as u64;
+        breakdown.finalize();
+
+        return scored_ids_to_dtos(&store, &scored);
+    }
+
+    // ── Filtered path: adaptive overfetch ────────────────────────────────
+    let filter_expr = filter.unwrap();
+    let overfetch_factors: &[usize] = &[4, 16, 32];
+
+    for &factor in overfetch_factors {
+        let fetch_count = top_k.saturating_mul(factor).max(top_k);
+
+        let t = Instant::now();
+        let scored = store.query_dense(&vector, fetch_count)?;
+        breakdown.hnsw_us = t.elapsed().as_micros() as u64;
+
+        if scored.is_empty() {
+            breakdown.finalize();
+            return Ok(vec![]);
+        }
+
+        let ids: Vec<u64> = scored.iter().map(|(id, _)| *id).collect();
+        let metadata_rows = store.fetch_metadata(&ids)?;
+
+        // Build a lookup from id → metadata fields for filter evaluation.
+        let meta_map: std::collections::HashMap<
+            u64,
+            &[(String, fastrag_store::schema::TypedValue)],
+        > = metadata_rows
+            .iter()
+            .map(|(id, fields)| (*id, fields.as_slice()))
+            .collect();
+
+        // Evaluate filter and keep passing candidates in score order.
+        let passing: Vec<(u64, f32)> = scored
+            .iter()
+            .filter(|(id, _)| {
+                meta_map
+                    .get(id)
+                    .is_some_and(|fields| crate::filter::matches(filter_expr, fields))
+            })
+            .take(top_k)
+            .copied()
+            .collect();
+
+        if passing.len() >= top_k || factor == *overfetch_factors.last().unwrap() {
+            breakdown.finalize();
+            return scored_ids_to_dtos(&store, &passing);
+        }
+        // Not enough survivors — retry with larger overfetch.
+    }
+
+    // Unreachable (loop always returns on last factor) but satisfy compiler.
+    breakdown.finalize();
+    Ok(vec![])
+}
+
+/// Convert a slice of `(id, score)` pairs into `SearchHitDto`s via the Store.
+///
+/// Each `ChunkHit` in a `SearchHit` maps to one `SearchHitDto`, inheriting
+/// the chunk-level score, text, source path, and metadata.
+fn scored_ids_to_dtos(
+    store: &fastrag_store::Store,
+    scored: &[(u64, f32)],
+) -> Result<Vec<SearchHitDto>, CorpusError> {
+    if scored.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let ids: Vec<u64> = scored.iter().map(|(id, _)| *id).collect();
+    let metadata_rows = store.fetch_metadata(&ids)?;
+    let meta_map: std::collections::HashMap<u64, Vec<(String, fastrag_store::schema::TypedValue)>> =
+        metadata_rows.into_iter().collect();
+
+    let hits = store.fetch_hits(scored)?;
+    let mut dtos = Vec::with_capacity(scored.len());
+    for hit in &hits {
+        // All chunks under this external_id share the same metadata (keyed by
+        // chunk id, but user fields are per-external_id in practice).
+        for chunk in &hit.chunks {
+            let metadata_fields = meta_map.get(&chunk.id).cloned().unwrap_or_default();
+            dtos.push(SearchHitDto {
+                score: chunk.score,
+                chunk_text: chunk.chunk_text.clone(),
+                source_path: PathBuf::from(&hit.external_id),
+                chunk_index: chunk.chunk_index,
+                section: None,
+                pages: vec![],
+                element_kinds: vec![],
+                language: None,
+                #[cfg(feature = "store")]
+                metadata: metadata_fields.into_iter().collect(),
+            });
+        }
+    }
+    Ok(dtos)
 }
 
 fn sidecar_path_for(path: &Path) -> PathBuf {
@@ -591,7 +702,7 @@ pub fn query_corpus_reranked(
     over_fetch: usize,
     embedder: &dyn DynEmbedderTrait,
     reranker: &dyn fastrag_rerank::Reranker,
-    filter: &std::collections::BTreeMap<String, String>,
+    filter: Option<&crate::filter::FilterExpr>,
     breakdown: &mut LatencyBreakdown,
 ) -> Result<Vec<SearchHitDto>, CorpusError> {
     use fastrag_rerank::RerankHit;

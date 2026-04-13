@@ -241,7 +241,7 @@ async fn metrics_handler(State(state): State<AppState>) -> impl IntoResponse {
 fn run_query(
     state: &AppState,
     params: &QueryParams,
-    filter_map: &std::collections::BTreeMap<String, String>,
+    filter: Option<&fastrag::filter::FilterExpr>,
 ) -> Result<Vec<SearchHitDto>, CorpusError> {
     let _ = state.dense_only; // hybrid removed; dense-only is the only path
 
@@ -257,7 +257,7 @@ fn run_query(
                 over_fetch,
                 state.embedder.as_ref() as &dyn DynEmbedderTrait,
                 reranker.as_ref(),
-                filter_map,
+                filter,
                 &mut fastrag::corpus::LatencyBreakdown::default(),
             );
         }
@@ -268,7 +268,7 @@ fn run_query(
         &params.q,
         params.top_k,
         state.embedder.as_ref() as &dyn DynEmbedderTrait,
-        filter_map,
+        filter,
         &mut fastrag::corpus::LatencyBreakdown::default(),
     )
 }
@@ -287,17 +287,17 @@ async fn query(
     let _enter = span.enter();
     let start = Instant::now();
 
-    let filter_map = match params.filter.as_deref() {
-        Some(s) => match crate::args::parse_filter(s) {
-            Ok(m) => m,
+    let filter_expr: Option<fastrag::filter::FilterExpr> = match params.filter.as_deref() {
+        Some(s) => match fastrag::filter::parse(s) {
+            Ok(f) => Some(f),
             Err(e) => {
                 return Err((StatusCode::BAD_REQUEST, format!("bad filter: {e}")).into_response());
             }
         },
-        None => std::collections::BTreeMap::new(),
+        None => None,
     };
 
-    let result = run_query(&state, &params, &filter_map);
+    let result = run_query(&state, &params, filter_expr.as_ref());
 
     let elapsed = start.elapsed();
     metrics::counter!("fastrag_query_total").increment(1);

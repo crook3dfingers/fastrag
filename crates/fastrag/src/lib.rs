@@ -1,5 +1,7 @@
 #[cfg(feature = "retrieval")]
 pub mod corpus;
+#[cfg(feature = "store")]
+pub mod filter;
 #[cfg(feature = "hygiene")]
 pub mod hygiene;
 #[cfg(feature = "store")]

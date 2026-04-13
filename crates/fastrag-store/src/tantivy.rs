@@ -9,7 +9,10 @@ use tantivy::schema::{
 use tantivy::{Index, IndexReader, IndexWriter, ReloadPolicy, TantivyDocument, Term};
 
 use crate::error::{StoreError, StoreResult};
-use crate::schema::{DynamicSchema, FieldDef, TypedKind};
+use crate::schema::{DynamicSchema, FieldDef, TypedKind, TypedValue};
+
+/// Per-document metadata: internal id paired with typed field values.
+pub type MetadataRow = (u64, Vec<(String, TypedValue)>);
 
 /// Handles to the always-present core Tantivy fields.
 #[derive(Debug, Clone)]
@@ -266,6 +269,71 @@ impl TantivyStore {
         Ok(None)
     }
 
+    /// Fetch user-field metadata for the given `_id` values.
+    ///
+    /// Returns `(id, Vec<(field_name, TypedValue)>)` pairs. Fields with no
+    /// stored value are silently skipped.
+    pub fn fetch_metadata(&self, ids: &[u64]) -> StoreResult<Vec<MetadataRow>> {
+        if ids.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let docs = self.fetch_by_ids(ids)?;
+        let core = &self.core;
+        let mut results = Vec::with_capacity(docs.len());
+
+        for doc in &docs {
+            let id = doc.get_first(core.id).and_then(|v| v.as_u64()).unwrap_or(0);
+
+            let mut fields: Vec<(String, TypedValue)> = Vec::new();
+
+            for handle in &self.user_fields {
+                match handle.typed {
+                    TypedKind::Array => {
+                        let vals: Vec<TypedValue> = doc
+                            .get_all(handle.field)
+                            .filter_map(|v| v.as_str().map(|s| TypedValue::String(s.to_string())))
+                            .collect();
+                        if !vals.is_empty() {
+                            fields.push((handle.name.clone(), TypedValue::Array(vals)));
+                        }
+                    }
+                    TypedKind::String => {
+                        if let Some(s) = doc.get_first(handle.field).and_then(|v| v.as_str()) {
+                            fields.push((handle.name.clone(), TypedValue::String(s.to_string())));
+                        }
+                    }
+                    TypedKind::Numeric => {
+                        if let Some(n) = doc.get_first(handle.field).and_then(|v| v.as_f64()) {
+                            fields.push((handle.name.clone(), TypedValue::Numeric(n)));
+                        }
+                    }
+                    TypedKind::Bool => {
+                        if let Some(u) = doc.get_first(handle.field).and_then(|v| v.as_u64()) {
+                            fields.push((handle.name.clone(), TypedValue::Bool(u == 1)));
+                        }
+                    }
+                    TypedKind::Date => {
+                        if let Some(naive) = doc
+                            .get_first(handle.field)
+                            .and_then(|v| v.as_datetime())
+                            .and_then(|dt| {
+                                chrono::DateTime::from_timestamp(dt.into_timestamp_secs(), 0)
+                                    .map(|d| d.date_naive())
+                            })
+                        {
+                            fields.push((handle.name.clone(), TypedValue::Date(naive)));
+                        }
+                    }
+                }
+            }
+
+            results.push((id, fields));
+        }
+
+        Ok(results)
+    }
+
     /// BM25 search over `_chunk_text`.
     ///
     /// Returns `(id, score)` pairs for the top-`k` results.
@@ -372,6 +440,125 @@ mod tests {
         assert_eq!(cvss.typed, TypedKind::Numeric);
 
         assert!(store.user_field("nonexistent").is_none());
+    }
+
+    // ── test: fetch_metadata ────────────────────────────────────────────────
+
+    #[test]
+    fn fetch_metadata_returns_typed_values() {
+        let dir = TempDir::new().unwrap();
+
+        let mut dyn_schema = DynamicSchema::new();
+        dyn_schema
+            .merge(FieldDef {
+                name: "severity".to_string(),
+                typed: TypedKind::String,
+                indexed: true,
+                stored: true,
+                positions: false,
+            })
+            .unwrap();
+        dyn_schema
+            .merge(FieldDef {
+                name: "cvss_score".to_string(),
+                typed: TypedKind::Numeric,
+                indexed: true,
+                stored: true,
+                positions: false,
+            })
+            .unwrap();
+        dyn_schema
+            .merge(FieldDef {
+                name: "published".to_string(),
+                typed: TypedKind::Bool,
+                indexed: true,
+                stored: true,
+                positions: false,
+            })
+            .unwrap();
+        dyn_schema
+            .merge(FieldDef {
+                name: "pub_date".to_string(),
+                typed: TypedKind::Date,
+                indexed: true,
+                stored: true,
+                positions: false,
+            })
+            .unwrap();
+        dyn_schema
+            .merge(FieldDef {
+                name: "tags".to_string(),
+                typed: TypedKind::Array,
+                indexed: false,
+                stored: true,
+                positions: false,
+            })
+            .unwrap();
+
+        let store = TantivyStore::create(dir.path(), &dyn_schema).unwrap();
+        let core = store.core();
+
+        let mut writer = store.writer().unwrap();
+        let mut doc = TantivyDocument::default();
+        doc.add_u64(core.id, 1);
+        doc.add_text(core.external_id, "vuln-001");
+        doc.add_text(core.content_hash, "abc");
+        doc.add_u64(core.chunk_index, 0);
+        doc.add_text(core.source_path, "/test.txt");
+        doc.add_text(core.source, "{}");
+        doc.add_text(core.chunk_text, "test chunk");
+
+        // Add user field values
+        let sev = store.user_field("severity").unwrap();
+        doc.add_text(sev.field, "critical");
+
+        let cvss = store.user_field("cvss_score").unwrap();
+        doc.add_f64(cvss.field, 9.8);
+
+        let pub_field = store.user_field("published").unwrap();
+        doc.add_u64(pub_field.field, 1); // true
+
+        let date_field = store.user_field("pub_date").unwrap();
+        let dt = chrono::NaiveDate::from_ymd_opt(2024, 6, 15)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap();
+        let tantivy_dt = ::tantivy::DateTime::from_timestamp_secs(dt.and_utc().timestamp());
+        doc.add_date(date_field.field, tantivy_dt);
+
+        let tags_field = store.user_field("tags").unwrap();
+        doc.add_text(tags_field.field, "rce");
+        doc.add_text(tags_field.field, "network");
+
+        writer.add_document(doc).unwrap();
+        writer.commit().unwrap();
+        store.reload().unwrap();
+
+        let meta = store.fetch_metadata(&[1]).unwrap();
+        assert_eq!(meta.len(), 1, "expected 1 result");
+
+        let (id, fields) = &meta[0];
+        assert_eq!(*id, 1);
+
+        use crate::schema::TypedValue;
+
+        let map: std::collections::HashMap<&str, &TypedValue> =
+            fields.iter().map(|(k, v)| (k.as_str(), v)).collect();
+
+        assert_eq!(map["severity"], &TypedValue::String("critical".to_string()));
+        assert_eq!(map["cvss_score"], &TypedValue::Numeric(9.8));
+        assert_eq!(map["published"], &TypedValue::Bool(true));
+        assert_eq!(
+            map["pub_date"],
+            &TypedValue::Date(chrono::NaiveDate::from_ymd_opt(2024, 6, 15).unwrap())
+        );
+        assert_eq!(
+            map["tags"],
+            &TypedValue::Array(vec![
+                TypedValue::String("rce".to_string()),
+                TypedValue::String("network".to_string()),
+            ])
+        );
     }
 
     // ── test 3 ───────────────────────────────────────────────────────────────

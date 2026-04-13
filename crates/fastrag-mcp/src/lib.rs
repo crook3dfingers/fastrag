@@ -103,9 +103,11 @@ pub struct SearchCorpusParams {
     /// Number of hits to return
     #[schemars(description = "Number of hits to return")]
     pub top_k: Option<usize>,
-    /// Equality filters applied to entry metadata (AND-combined)
-    #[schemars(description = "Equality filters applied to entry metadata (AND-combined)")]
-    pub filter: Option<std::collections::BTreeMap<String, String>>,
+    /// Filter expression: plain string parsed as filter syntax, or JSON AST object
+    #[schemars(
+        description = "Filter expression: plain string parsed as filter syntax, or JSON AST object"
+    )]
+    pub filter: Option<serde_json::Value>,
     /// Search mode: "hybrid" (default when available) or "dense-only".
     /// Hybrid uses BM25 + dense vectors fused with RRF; dense-only skips Tantivy.
     /// NOTE: Accepted in schema but not yet acted on — hybrid in MCP is deferred
@@ -297,7 +299,15 @@ impl FastRagMcpServer {
             let corpus_path = params.corpus_path.clone();
             let query = params.query.clone();
             let top_k = params.top_k.unwrap_or(5);
-            let filter = params.filter.clone().unwrap_or_default();
+            let filter_expr: Option<fastrag::filter::FilterExpr> = match params.filter {
+                Some(serde_json::Value::String(s)) => {
+                    Some(fastrag::filter::parse(&s).map_err(|e| e.to_string())?)
+                }
+                Some(v) => Some(
+                    serde_json::from_value(v).map_err(|e| format!("invalid filter JSON: {e}"))?,
+                ),
+                None => None,
+            };
 
             let hits = tokio::task::spawn_blocking(move || {
                 ops::query_corpus_with_filter(
@@ -305,7 +315,7 @@ impl FastRagMcpServer {
                     &query,
                     top_k,
                     embedder.as_ref(),
-                    &filter,
+                    filter_expr.as_ref(),
                     &mut fastrag::corpus::LatencyBreakdown::default(),
                 )
             })

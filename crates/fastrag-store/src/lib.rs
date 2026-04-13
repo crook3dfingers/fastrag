@@ -197,6 +197,13 @@ impl Store {
         Ok(deleted_ids)
     }
 
+    /// Fetch user-field metadata for the given `_id` values.
+    ///
+    /// Delegates to [`TantivyStore::fetch_metadata`].
+    pub fn fetch_metadata(&self, ids: &[u64]) -> StoreResult<Vec<crate::tantivy::MetadataRow>> {
+        self.tantivy.fetch_metadata(ids)
+    }
+
     /// Return the content hash for an external_id, if present.
     pub fn content_hash_for(&self, external_id: &str) -> StoreResult<Option<String>> {
         self.tantivy.content_hash_for(external_id)
@@ -432,6 +439,64 @@ mod tests {
         assert_eq!(hit.external_id, "finding-001");
         assert_eq!(hit.chunks.len(), 2, "expected 2 chunks");
         assert!(hit.source.is_some(), "source must be present");
+    }
+
+    #[test]
+    fn store_fetch_metadata_delegates_to_tantivy() {
+        let dir = TempDir::new().unwrap();
+        let mut schema = DynamicSchema::new();
+        schema
+            .merge(FieldDef {
+                name: "severity".to_string(),
+                typed: TypedKind::String,
+                indexed: true,
+                stored: true,
+                positions: false,
+            })
+            .unwrap();
+        schema
+            .merge(FieldDef {
+                name: "cvss_score".to_string(),
+                typed: TypedKind::Numeric,
+                indexed: true,
+                stored: true,
+                positions: false,
+            })
+            .unwrap();
+
+        let mut store = Store::create(dir.path(), test_manifest(), schema).unwrap();
+
+        let rec = ChunkRecord {
+            id: 1,
+            external_id: "vuln-001".to_string(),
+            content_hash: "h1".to_string(),
+            chunk_index: 0,
+            source_path: "/test.txt".to_string(),
+            source_json: None,
+            chunk_text: "test".to_string(),
+            vector: vec![1.0, 0.0, 0.0],
+            user_fields: vec![
+                (
+                    "severity".to_string(),
+                    TypedValue::String("high".to_string()),
+                ),
+                ("cvss_score".to_string(), TypedValue::Numeric(7.5)),
+            ],
+        };
+
+        store.add_records(vec![rec]).unwrap();
+
+        let meta = store.fetch_metadata(&[1]).unwrap();
+        assert_eq!(meta.len(), 1);
+
+        let (id, fields) = &meta[0];
+        assert_eq!(*id, 1);
+
+        let map: std::collections::HashMap<&str, &TypedValue> =
+            fields.iter().map(|(k, v)| (k.as_str(), v)).collect();
+
+        assert_eq!(map["severity"], &TypedValue::String("high".to_string()));
+        assert_eq!(map["cvss_score"], &TypedValue::Numeric(7.5));
     }
 
     #[test]
