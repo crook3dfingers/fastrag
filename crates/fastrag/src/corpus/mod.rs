@@ -395,6 +395,8 @@ pub struct BatchQueryParams {
     pub text: String,
     pub top_k: usize,
     pub filter: Option<crate::filter::FilterExpr>,
+    /// Max characters for snippet. 0 disables.
+    pub snippet_len: usize,
 }
 
 /// Per-query result from `batch_query`.
@@ -460,6 +462,7 @@ pub fn batch_query(
                     fan_out,
                     filter,
                     &mut LatencyBreakdown::default(),
+                    p.snippet_len,
                 )?;
                 use fastrag_rerank::RerankHit;
                 let rerank_input: Vec<RerankHit> = candidates
@@ -495,6 +498,7 @@ pub fn batch_query(
                 p.top_k,
                 filter,
                 &mut LatencyBreakdown::default(),
+                p.snippet_len,
             )
         })
         .collect()
@@ -511,6 +515,7 @@ fn query_with_store(
     top_k: usize,
     filter: Option<&crate::filter::FilterExpr>,
     breakdown: &mut LatencyBreakdown,
+    snippet_len: usize,
 ) -> Result<Vec<SearchHitDto>, CorpusError> {
     use std::time::Instant;
 
@@ -519,7 +524,7 @@ fn query_with_store(
         let scored = store.query_dense(vector, top_k)?;
         breakdown.hnsw_us = t.elapsed().as_micros() as u64;
         breakdown.finalize();
-        return scored_ids_to_dtos(store, &scored, None, 0);
+        return scored_ids_to_dtos(store, &scored, None, snippet_len);
     }
 
     let filter_expr = filter.unwrap();
@@ -555,14 +560,14 @@ fn query_with_store(
                 survivors.push((*id, *score));
                 if survivors.len() >= top_k {
                     breakdown.finalize();
-                    return scored_ids_to_dtos(store, &survivors, None, 0);
+                    return scored_ids_to_dtos(store, &survivors, None, snippet_len);
                 }
             }
         }
 
         if factor == 32 {
             breakdown.finalize();
-            return scored_ids_to_dtos(store, &survivors, None, 0);
+            return scored_ids_to_dtos(store, &survivors, None, snippet_len);
         }
     }
 
@@ -877,7 +882,15 @@ pub fn query_corpus(
     breakdown: &mut LatencyBreakdown,
     snippet_len: usize,
 ) -> Result<Vec<SearchHitDto>, CorpusError> {
-    query_corpus_with_filter(corpus_dir, query, top_k, embedder, None, breakdown, snippet_len)
+    query_corpus_with_filter(
+        corpus_dir,
+        query,
+        top_k,
+        embedder,
+        None,
+        breakdown,
+        snippet_len,
+    )
 }
 
 /// Two-stage filtered retrieval: HNSW returns candidates, an expression
@@ -1140,8 +1153,15 @@ pub fn query_corpus_reranked(
     use std::time::Instant;
 
     let fan_out = top_k.saturating_mul(over_fetch.max(1)).max(top_k);
-    let first_stage =
-        query_corpus_with_filter(corpus_dir, query, fan_out, embedder, filter, breakdown, snippet_len)?;
+    let first_stage = query_corpus_with_filter(
+        corpus_dir,
+        query,
+        fan_out,
+        embedder,
+        filter,
+        breakdown,
+        snippet_len,
+    )?;
 
     let rerank_input: Vec<RerankHit> = first_stage
         .iter()
@@ -1656,11 +1676,13 @@ mod batch_query_tests {
                 text: "alpha beta gamma".to_string(),
                 top_k: 3,
                 filter: None,
+                snippet_len: 0,
             },
             BatchQueryParams {
                 text: "delta epsilon zeta".to_string(),
                 top_k: 3,
                 filter: None,
+                snippet_len: 0,
             },
         ];
 
@@ -1730,16 +1752,19 @@ mod batch_query_tests {
                 text: "q1".into(),
                 top_k: 5,
                 filter: None,
+                snippet_len: 0,
             },
             BatchQueryParams {
                 text: "q2".into(),
                 top_k: 5,
                 filter: None,
+                snippet_len: 0,
             },
             BatchQueryParams {
                 text: "q3".into(),
                 top_k: 5,
                 filter: None,
+                snippet_len: 0,
             },
         ];
         let results = batch_query(

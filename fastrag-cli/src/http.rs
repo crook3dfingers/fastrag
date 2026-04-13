@@ -153,10 +153,20 @@ struct QueryParams {
     /// Named corpus to query. Defaults to `"default"`.
     #[serde(default)]
     corpus: Option<String>,
+    /// Max characters for snippet. 0 disables. Default 150.
+    #[serde(default = "default_snippet_len")]
+    snippet_len: usize,
+    /// Comma-separated field projection (e.g. "score,snippet" or "-chunk_text").
+    #[serde(default)]
+    fields: Option<String>,
 }
 
 fn default_top_k() -> usize {
     5
+}
+
+fn default_snippet_len() -> usize {
+    150
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -175,6 +185,10 @@ struct BatchQueryItem {
     /// Named corpus to query. Defaults to `"default"`.
     #[serde(default)]
     corpus: Option<String>,
+    #[serde(default = "default_snippet_len")]
+    snippet_len: usize,
+    #[serde(default)]
+    fields: Option<String>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -186,7 +200,7 @@ struct BatchQueryResponse {
 struct BatchResultItem {
     index: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
-    hits: Option<Vec<fastrag::corpus::SearchHitDto>>,
+    hits: Option<Vec<serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
 }
@@ -203,6 +217,102 @@ pub enum HttpError {
     Server(String),
     #[error("metrics setup: {0}")]
     Metrics(String),
+}
+
+#[derive(Debug, Clone)]
+enum FieldSelection {
+    All,
+    Include(Vec<String>),
+    Exclude(Vec<String>),
+}
+
+fn parse_field_selection(fields: Option<&str>) -> Result<FieldSelection, String> {
+    let raw = match fields {
+        None | Some("") => return Ok(FieldSelection::All),
+        Some(s) => s,
+    };
+    let parts: Vec<&str> = raw
+        .split(',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if parts.is_empty() {
+        return Ok(FieldSelection::All);
+    }
+    let has_exclude = parts.iter().any(|p| p.starts_with('-'));
+    let has_include = parts.iter().any(|p| !p.starts_with('-'));
+    if has_exclude && has_include {
+        return Err("cannot mix include and exclude field selectors".to_string());
+    }
+    if has_exclude {
+        Ok(FieldSelection::Exclude(
+            parts
+                .iter()
+                .map(|p| p.trim_start_matches('-').to_string())
+                .collect(),
+        ))
+    } else {
+        Ok(FieldSelection::Include(
+            parts.iter().map(|p| p.to_string()).collect(),
+        ))
+    }
+}
+
+fn apply_field_selection(hits: &mut [serde_json::Value], selection: &FieldSelection) {
+    match selection {
+        FieldSelection::All => {}
+        FieldSelection::Include(fields) => {
+            let mut top_level: Vec<&str> = Vec::new();
+            let mut source_sub: Vec<&str> = Vec::new();
+            for f in fields {
+                if let Some(sub) = f.strip_prefix("source.") {
+                    source_sub.push(sub);
+                } else {
+                    top_level.push(f);
+                }
+            }
+            if !source_sub.is_empty() && !top_level.contains(&"source") {
+                top_level.push("source");
+            }
+            for hit in hits.iter_mut() {
+                if let Some(obj) = hit.as_object_mut() {
+                    let keys: Vec<String> = obj.keys().cloned().collect();
+                    for key in keys {
+                        if !top_level.contains(&key.as_str()) {
+                            obj.remove(&key);
+                        }
+                    }
+                    if !source_sub.is_empty()
+                        && let Some(source) = obj.get_mut("source").and_then(|v| v.as_object_mut())
+                    {
+                        let src_keys: Vec<String> = source.keys().cloned().collect();
+                        for key in src_keys {
+                            if !source_sub.contains(&key.as_str()) {
+                                source.remove(&key);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        FieldSelection::Exclude(fields) => {
+            for hit in hits.iter_mut() {
+                if let Some(obj) = hit.as_object_mut() {
+                    for f in fields {
+                        if let Some(sub) = f.strip_prefix("source.") {
+                            if let Some(source) =
+                                obj.get_mut("source").and_then(|v| v.as_object_mut())
+                            {
+                                source.remove(sub);
+                            }
+                        } else {
+                            obj.remove(f.as_str());
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Optional reranker configuration for the HTTP server.
@@ -763,7 +873,7 @@ fn run_query(
                 reranker.as_ref(),
                 filter,
                 &mut fastrag::corpus::LatencyBreakdown::default(),
-                0,
+                params.snippet_len,
             );
         }
     }
@@ -775,7 +885,7 @@ fn run_query(
         state.embedder.as_ref() as &dyn DynEmbedderTrait,
         filter,
         &mut fastrag::corpus::LatencyBreakdown::default(),
-        0,
+        params.snippet_len,
     )
 }
 
@@ -896,6 +1006,7 @@ async fn batch_query_handler(
                 text: item.q.clone(),
                 top_k: item.top_k,
                 filter,
+                snippet_len: item.snippet_len,
             }
         })
         .collect();
@@ -920,11 +1031,20 @@ async fn batch_query_handler(
                 };
             }
             match result {
-                Ok(hits) => BatchResultItem {
-                    index: i,
-                    hits: Some(hits),
-                    error: None,
-                },
+                Ok(dtos) => {
+                    let field_sel = parse_field_selection(req.queries[i].fields.as_deref())
+                        .unwrap_or(FieldSelection::All);
+                    let mut json_hits: Vec<serde_json::Value> = dtos
+                        .iter()
+                        .map(|h| serde_json::to_value(h).unwrap())
+                        .collect();
+                    apply_field_selection(&mut json_hits, &field_sel);
+                    BatchResultItem {
+                        index: i,
+                        hits: Some(json_hits),
+                        error: None,
+                    }
+                }
                 Err(e) => BatchResultItem {
                     index: i,
                     hits: None,
@@ -941,7 +1061,12 @@ async fn query(
     State(state): State<AppState>,
     Query(params): Query<QueryParams>,
     tenant_ext: Option<Extension<TenantFilter>>,
-) -> Result<Json<Vec<SearchHitDto>>, Response> {
+) -> Result<Json<Vec<serde_json::Value>>, Response> {
+    let field_sel = match parse_field_selection(params.fields.as_deref()) {
+        Ok(sel) => sel,
+        Err(e) => return Err((StatusCode::BAD_REQUEST, e).into_response()),
+    };
+
     let span = info_span!(
         "query",
         q = %params.q,
@@ -989,7 +1114,12 @@ async fn query(
         Ok(hits) => {
             span.record("hit_count", hits.len());
             info!("query served");
-            Ok(Json(hits))
+            let mut json_hits: Vec<serde_json::Value> = hits
+                .iter()
+                .map(|h| serde_json::to_value(h).unwrap())
+                .collect();
+            apply_field_selection(&mut json_hits, &field_sel);
+            Ok(Json(json_hits))
         }
         Err(CorpusError::NotFound(_)) => {
             warn!(corpus = corpus_name, "corpus not found");
