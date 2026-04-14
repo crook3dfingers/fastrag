@@ -1257,6 +1257,8 @@ pub fn query_corpus_reranked(
     )
 }
 
+#[cfg(feature = "rerank")]
+#[allow(clippy::too_many_arguments)]
 pub fn query_corpus_reranked_opts(
     corpus_dir: &Path,
     query: &str,
