@@ -163,6 +163,30 @@ struct QueryParams {
     /// Override server default `--cwe-expand`. None = use server default.
     #[serde(default)]
     cwe_expand: Option<bool>,
+    /// Enable BM25 + dense hybrid retrieval via RRF.
+    #[serde(default)]
+    hybrid: Option<bool>,
+    /// RRF k. Default 60.
+    #[serde(default)]
+    rrf_k: Option<u32>,
+    /// Per-retriever overfetch multiplier.
+    #[serde(default)]
+    rrf_overfetch: Option<usize>,
+    /// Name of the Date metadata field for temporal decay. Implies hybrid.
+    #[serde(default)]
+    time_decay_field: Option<String>,
+    /// Humantime halflife string (e.g. "30d").
+    #[serde(default)]
+    time_decay_halflife: Option<String>,
+    /// Alpha floor (0..=1).
+    #[serde(default)]
+    time_decay_weight: Option<f32>,
+    /// Dateless prior (0..=1).
+    #[serde(default)]
+    time_decay_dateless_prior: Option<f32>,
+    /// Blend: "multiplicative" or "additive".
+    #[serde(default)]
+    time_decay_blend: Option<String>,
 }
 
 fn default_top_k() -> usize {
@@ -861,17 +885,18 @@ fn run_query(
     params: &QueryParams,
     filter: Option<&fastrag::filter::FilterExpr>,
     corpus_name: &str,
+    hybrid: fastrag::corpus::hybrid::HybridOpts,
 ) -> Result<Vec<SearchHitDto>, CorpusError> {
     let corpus_dir = state
         .registry
         .corpus_path(corpus_name)
         .ok_or_else(|| CorpusError::NotFound(corpus_name.to_string()))?;
 
-    let _ = state.dense_only; // hybrid removed; dense-only is the only path
+    let _ = state.dense_only; // dense_only is a server-level flag; per-request hybrid opts take precedence
 
     let query_opts = ops::QueryOpts {
         cwe_expand: params.cwe_expand.unwrap_or(state.cwe_expand_default),
-        ..Default::default()
+        hybrid,
     };
 
     #[cfg(feature = "rerank")]
@@ -1117,10 +1142,55 @@ async fn query(
         base_filter
     };
 
+    // Validate + build hybrid opts. Return 400 on bad inputs.
+    let hybrid_opts = {
+        use crate::args::{TimeDecayBlendArg, build_hybrid_opts};
+
+        let blend_str = params
+            .time_decay_blend
+            .as_deref()
+            .unwrap_or("multiplicative");
+        let blend = match blend_str {
+            "multiplicative" => TimeDecayBlendArg::Multiplicative,
+            "additive" => TimeDecayBlendArg::Additive,
+            other => {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    format!(
+                        "time_decay_blend: expected 'multiplicative' or 'additive', got {other:?}"
+                    ),
+                )
+                    .into_response());
+            }
+        };
+
+        match build_hybrid_opts(
+            params.hybrid.unwrap_or(false),
+            params.rrf_k.unwrap_or(60),
+            params.rrf_overfetch.unwrap_or(4),
+            params.time_decay_field.clone(),
+            params.time_decay_halflife.as_deref().unwrap_or("30d"),
+            params.time_decay_weight.unwrap_or(0.3),
+            params.time_decay_dateless_prior.unwrap_or(0.5),
+            blend,
+        ) {
+            Ok(opts) => opts,
+            Err(e) => {
+                return Err((StatusCode::BAD_REQUEST, e).into_response());
+            }
+        }
+    };
+
     let corpus_name = params.corpus.as_deref().unwrap_or("default");
     let lock = get_or_create_lock(&state.ingest_locks, corpus_name);
     let _read_guard = lock.read().await;
-    let result = run_query(&state, &params, filter_expr.as_ref(), corpus_name);
+    let result = run_query(
+        &state,
+        &params,
+        filter_expr.as_ref(),
+        corpus_name,
+        hybrid_opts,
+    );
 
     let elapsed = start.elapsed();
     metrics::counter!("fastrag_query_total").increment(1);

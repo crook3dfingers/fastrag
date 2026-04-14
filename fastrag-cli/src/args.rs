@@ -60,6 +60,58 @@ pub enum TimeDecayBlendArg {
     Additive,
 }
 
+#[cfg(feature = "retrieval")]
+#[allow(clippy::too_many_arguments)]
+pub fn build_hybrid_opts(
+    hybrid: bool,
+    rrf_k: u32,
+    rrf_overfetch: usize,
+    time_decay_field: Option<String>,
+    time_decay_halflife: &str,
+    time_decay_weight: f32,
+    time_decay_dateless_prior: f32,
+    time_decay_blend: TimeDecayBlendArg,
+) -> Result<fastrag::corpus::hybrid::HybridOpts, String> {
+    use fastrag::corpus::hybrid::{BlendMode, HybridOpts, TemporalOpts};
+
+    let has_decay_params_without_field = time_decay_field.is_none()
+        && (time_decay_halflife != "30d"
+            || time_decay_weight != 0.3
+            || time_decay_dateless_prior != 0.5);
+    if has_decay_params_without_field {
+        return Err(
+            "--time-decay-halflife / -weight / -dateless-prior require --time-decay-field"
+                .to_string(),
+        );
+    }
+
+    let temporal = if let Some(field) = time_decay_field {
+        let halflife = humantime::parse_duration(time_decay_halflife)
+            .map_err(|e| format!("--time-decay-halflife: {e}"))?;
+        Some(TemporalOpts {
+            date_field: field,
+            halflife,
+            weight_floor: time_decay_weight,
+            dateless_prior: time_decay_dateless_prior,
+            blend: match time_decay_blend {
+                TimeDecayBlendArg::Multiplicative => BlendMode::Multiplicative,
+                TimeDecayBlendArg::Additive => BlendMode::Additive,
+            },
+            now: chrono::Utc::now(),
+        })
+    } else {
+        None
+    };
+
+    let enabled = hybrid || temporal.is_some();
+    Ok(HybridOpts {
+        enabled,
+        rrf_k,
+        overfetch_factor: rrf_overfetch,
+        temporal,
+    })
+}
+
 #[derive(Parser)]
 #[command(name = "fastrag", about = "Fast document parser for AI/RAG pipelines")]
 #[command(version)]
