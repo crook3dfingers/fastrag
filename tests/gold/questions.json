@@ -770,6 +770,34 @@
       "must_contain_cve_ids": ["CVE-2022-22965"],
       "must_contain_terms": ["Spring"],
       "notes": "kev_flag test — Spring4Shell is in the test KEV minimal catalog fixture"
+    },
+    {
+      "id": "cwe-hier-001",
+      "question": "Show me SQL injection (CWE-89) findings in our codebase.",
+      "must_contain_cve_ids": [],
+      "must_contain_terms": ["Hibernate", "HQL"],
+      "notes": "CWE hierarchy — parent CWE-89 in query, expected doc tagged with child CWE-564 (Hibernate Injection). Without --cwe-expand, the Hibernate finding is invisible."
+    },
+    {
+      "id": "cwe-hier-002",
+      "question": "Which cross-site scripting (CWE-79) issues are open?",
+      "must_contain_cve_ids": [],
+      "must_contain_terms": ["DOM", "stored"],
+      "notes": "CWE hierarchy — parent CWE-79 in query, expected docs tagged with children CWE-80 (Basic XSS) and CWE-81 (Script in error message). --cwe-expand required for recall."
+    },
+    {
+      "id": "cwe-hier-003",
+      "question": "Any path traversal (CWE-22) vulnerabilities in the upload handler?",
+      "must_contain_cve_ids": [],
+      "must_contain_terms": ["..", "relative"],
+      "notes": "CWE hierarchy — parent CWE-22 in query, expected doc tagged with child CWE-23 (Relative Path Traversal)."
+    },
+    {
+      "id": "cwe-hier-004",
+      "question": "What command injection (CWE-77) findings should I review first?",
+      "must_contain_cve_ids": [],
+      "must_contain_terms": ["shell", "argv"],
+      "notes": "CWE hierarchy — parent CWE-77 in query, expected doc tagged with child CWE-78 (OS Command Injection)."
     }
   ]
 }
