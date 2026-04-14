@@ -20,9 +20,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "--out" => output = args.next().map(PathBuf::from),
             "--view" => view = args.next().unwrap_or(view),
             "--help" | "-h" => {
-                println!(
-                    "Usage: compile-taxonomy --in INPUT.xml --out OUTPUT.json [--view 1000]"
-                );
+                println!("Usage: compile-taxonomy --in INPUT.xml --out OUTPUT.json [--view 1000]");
                 return Ok(());
             }
             other => return Err(format!("unknown arg: {other}").into()),

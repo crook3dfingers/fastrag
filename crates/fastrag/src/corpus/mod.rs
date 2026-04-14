@@ -941,6 +941,7 @@ pub fn query_corpus_with_filter(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn query_corpus_with_filter_opts(
     corpus_dir: &Path,
     query: &str,
@@ -995,9 +996,7 @@ pub fn query_corpus_with_filter_opts(
                 }
             }
             (Some(f), true, None) => {
-                eprintln!(
-                    "warn: --cwe-expand set but corpus has no cwe_field; ignoring"
-                );
+                eprintln!("warn: --cwe-expand set but corpus has no cwe_field; ignoring");
                 Some(f.clone())
             }
             (Some(f), false, _) => Some(f.clone()),

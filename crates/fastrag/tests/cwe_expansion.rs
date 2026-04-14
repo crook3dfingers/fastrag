@@ -8,11 +8,11 @@ use std::fs;
 use std::path::Path;
 
 use fastrag::ChunkingStrategy;
+use fastrag::corpus::SearchHitDto;
 use fastrag::corpus::{LatencyBreakdown, QueryOpts, query_corpus_with_filter_opts};
 use fastrag::filter::FilterExpr;
 use fastrag::ingest::engine::index_jsonl;
 use fastrag::ingest::jsonl::JsonlIngestConfig;
-use fastrag::corpus::SearchHitDto;
 use fastrag_embed::DynEmbedderTrait;
 use fastrag_embed::test_utils::MockEmbedder;
 use fastrag_store::schema::{TypedKind, TypedValue};

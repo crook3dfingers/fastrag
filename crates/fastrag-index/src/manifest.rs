@@ -227,7 +227,10 @@ mod v5_tests {
         );
         let mut value = serde_json::to_value(&m_ref).unwrap();
         value.as_object_mut().unwrap().remove("cwe_field");
-        value.as_object_mut().unwrap().remove("cwe_taxonomy_version");
+        value
+            .as_object_mut()
+            .unwrap()
+            .remove("cwe_taxonomy_version");
         let json = serde_json::to_string(&value).unwrap();
         let m: CorpusManifest = serde_json::from_str(&json).unwrap();
         assert!(m.cwe_field.is_none());
