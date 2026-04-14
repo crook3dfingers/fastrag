@@ -472,7 +472,14 @@ async fn main() {
             ollama_url,
             filter,
             filter_json,
-            dense_only,
+            hybrid,
+            rrf_k,
+            rrf_overfetch,
+            time_decay_field,
+            time_decay_halflife,
+            time_decay_weight,
+            time_decay_dateless_prior,
+            time_decay_blend,
             cwe_expand,
             no_cwe_expand,
             #[cfg(feature = "rerank")]
@@ -521,17 +528,29 @@ async fn main() {
                         .and_then(|m| m.cwe_field)
                         .is_some()
                 };
+                let hybrid_opts = build_hybrid_opts(
+                    hybrid,
+                    rrf_k,
+                    rrf_overfetch,
+                    time_decay_field,
+                    &time_decay_halflife,
+                    time_decay_weight,
+                    time_decay_dateless_prior,
+                    time_decay_blend,
+                )
+                .unwrap_or_else(|e| {
+                    eprintln!("error: {e}");
+                    std::process::exit(2);
+                });
                 let query_opts = ops::QueryOpts {
                     cwe_expand: cwe_expand_effective,
-                    ..Default::default()
+                    hybrid: hybrid_opts,
                 };
 
                 #[cfg(feature = "rerank")]
                 let use_rerank = !no_rerank;
                 #[cfg(not(feature = "rerank"))]
                 let use_rerank = false;
-
-                let _ = dense_only; // hybrid removed; dense-only is the only path
 
                 let result = if use_rerank {
                     #[cfg(feature = "rerank")]
@@ -827,6 +846,58 @@ async fn main() {
             fastrag_mcp::serve_stdio().await.unwrap();
         }
     }
+}
+
+#[cfg(feature = "retrieval")]
+#[allow(clippy::too_many_arguments)]
+fn build_hybrid_opts(
+    hybrid: bool,
+    rrf_k: u32,
+    rrf_overfetch: usize,
+    time_decay_field: Option<String>,
+    time_decay_halflife: &str,
+    time_decay_weight: f32,
+    time_decay_dateless_prior: f32,
+    time_decay_blend: fastrag_cli::args::TimeDecayBlendArg,
+) -> Result<fastrag::corpus::hybrid::HybridOpts, String> {
+    use fastrag::corpus::hybrid::{BlendMode, HybridOpts, TemporalOpts};
+
+    let has_decay_params_without_field = time_decay_field.is_none()
+        && (time_decay_halflife != "30d"
+            || time_decay_weight != 0.3
+            || time_decay_dateless_prior != 0.5);
+    if has_decay_params_without_field {
+        return Err(
+            "--time-decay-halflife / -weight / -dateless-prior require --time-decay-field"
+                .to_string(),
+        );
+    }
+
+    let temporal = if let Some(field) = time_decay_field {
+        let halflife = humantime::parse_duration(time_decay_halflife)
+            .map_err(|e| format!("--time-decay-halflife: {e}"))?;
+        Some(TemporalOpts {
+            date_field: field,
+            halflife,
+            weight_floor: time_decay_weight,
+            dateless_prior: time_decay_dateless_prior,
+            blend: match time_decay_blend {
+                fastrag_cli::args::TimeDecayBlendArg::Multiplicative => BlendMode::Multiplicative,
+                fastrag_cli::args::TimeDecayBlendArg::Additive => BlendMode::Additive,
+            },
+            now: chrono::Utc::now(),
+        })
+    } else {
+        None
+    };
+
+    let enabled = hybrid || temporal.is_some();
+    Ok(HybridOpts {
+        enabled,
+        rrf_k,
+        overfetch_factor: rrf_overfetch,
+        temporal,
+    })
 }
 
 #[cfg(feature = "retrieval")]

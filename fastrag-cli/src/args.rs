@@ -52,6 +52,14 @@ pub enum IngestPresetArg {
     TarmoFinding,
 }
 
+#[cfg(feature = "retrieval")]
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+#[value(rename_all = "kebab-case")]
+pub enum TimeDecayBlendArg {
+    Multiplicative,
+    Additive,
+}
+
 #[derive(Parser)]
 #[command(name = "fastrag", about = "Fast document parser for AI/RAG pipelines")]
 #[command(version)]
@@ -341,9 +349,40 @@ pub enum Command {
         #[arg(long, conflicts_with = "filter")]
         filter_json: Option<String>,
 
-        /// Skip BM25/Tantivy and use dense vector search only.
+        /// Enable BM25 + dense hybrid retrieval via Reciprocal Rank Fusion.
+        /// Disabled by default (dense-only path preserves current behavior).
         #[arg(long)]
-        dense_only: bool,
+        hybrid: bool,
+
+        /// RRF k parameter. Default 60 per the canonical RRF paper.
+        #[arg(long, default_value_t = 60)]
+        rrf_k: u32,
+
+        /// Per-retriever overfetch multiplier — fetch rrf_overfetch * top_k
+        /// from each retriever before fusion.
+        #[arg(long, default_value_t = 4)]
+        rrf_overfetch: usize,
+
+        /// Name of the `Date` metadata field to use for temporal decay.
+        /// Implies --hybrid.
+        #[arg(long)]
+        time_decay_field: Option<String>,
+
+        /// Decay halflife (humantime format, e.g. "30d", "7d", "1y").
+        #[arg(long, default_value = "30d")]
+        time_decay_halflife: String,
+
+        /// Alpha floor: minimum decay factor for very old docs. Range 0..=1.
+        #[arg(long, default_value_t = 0.3)]
+        time_decay_weight: f32,
+
+        /// Neutral prior used for docs missing the date field. Range 0..=1.
+        #[arg(long, default_value_t = 0.5)]
+        time_decay_dateless_prior: f32,
+
+        /// Blend mode: multiplicative (default) or additive.
+        #[arg(long, value_enum, default_value = "multiplicative")]
+        time_decay_blend: TimeDecayBlendArg,
 
         /// Reranker backend (default: onnx). Reranking is on by default.
         #[cfg(feature = "rerank")]

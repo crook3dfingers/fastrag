@@ -32,6 +32,8 @@ metrics = "0.24"
 metrics-exporter-prometheus = { version = "0.16", default-features = false }
 subtle = "2"
 dirs.workspace = true
+humantime = { workspace = true }
+chrono.workspace = true
 
 [features]
 default = ["language-detection", "mcp", "retrieval", "rerank", "store"]
