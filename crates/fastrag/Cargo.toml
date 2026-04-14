@@ -27,6 +27,7 @@ fastrag-index = { workspace = true, optional = true }
 fastrag-rerank = { workspace = true, optional = true }
 fastrag-context = { workspace = true, optional = true }
 fastrag-nvd = { workspace = true, optional = true }
+fastrag-cwe = { workspace = true }
 fastrag-store = { workspace = true, optional = true }
 blake3 = { workspace = true, optional = true }
 chrono = { workspace = true, optional = true }

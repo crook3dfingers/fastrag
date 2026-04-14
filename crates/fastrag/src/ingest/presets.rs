@@ -54,6 +54,7 @@ pub fn tarmo_finding_preset() -> JsonlIngestConfig {
             "source_tools".into(),
             "methodology_items".into(),
         ],
+        cwe_field: Some("cwe_id".into()),
     }
 }
 
@@ -125,6 +126,12 @@ mod tests {
             Some(&TypedKind::Date)
         );
         assert_eq!(cfg.metadata_types.len(), 6, "exactly 6 type overrides");
+    }
+
+    #[test]
+    fn tarmo_preset_sets_cwe_field() {
+        let cfg = tarmo_finding_preset();
+        assert_eq!(cfg.cwe_field.as_deref(), Some("cwe_id"));
     }
 
     #[test]

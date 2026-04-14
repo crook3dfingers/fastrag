@@ -31,6 +31,7 @@ fn toy_corpus() -> tempfile::TempDir {
         metadata_fields: vec![],
         metadata_types: BTreeMap::new(),
         array_fields: vec![],
+        cwe_field: None,
     };
     index_jsonl(
         &jsonl_path,

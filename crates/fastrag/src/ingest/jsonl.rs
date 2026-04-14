@@ -17,6 +17,9 @@ pub struct JsonlIngestConfig {
     pub metadata_types: BTreeMap<String, TypedKind>,
     /// Fields that should always be treated as `Array` even if the JSON value is scalar.
     pub array_fields: Vec<String>,
+    /// Name of the record field holding the CWE numeric id. Written to the
+    /// corpus manifest so query-time CWE hierarchy expansion can find it.
+    pub cwe_field: Option<String>,
 }
 
 /// A single parsed record ready for downstream ingestion.
@@ -276,6 +279,7 @@ mod tests {
             ],
             metadata_types: BTreeMap::new(),
             array_fields: vec!["tags".to_string()],
+            cwe_field: None,
         }
     }
 

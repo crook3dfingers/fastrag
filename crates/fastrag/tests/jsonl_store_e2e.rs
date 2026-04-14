@@ -27,6 +27,7 @@ fn make_config() -> JsonlIngestConfig {
         metadata_fields: vec!["severity".into()],
         metadata_types: BTreeMap::new(),
         array_fields: vec![],
+        cwe_field: None,
     }
 }
 
@@ -147,6 +148,7 @@ fn make_filter_config() -> JsonlIngestConfig {
         metadata_fields: vec!["severity".into(), "cvss_score".into(), "tags".into()],
         metadata_types: types,
         array_fields: vec!["tags".into()],
+        cwe_field: None,
     }
 }
 

@@ -275,6 +275,12 @@ pub enum Command {
         #[arg(long, value_delimiter = ',')]
         array_fields: Option<Vec<String>>,
 
+        /// JSONL: name of the field holding the CWE numeric id. Enables
+        /// query-time CWE hierarchy expansion for this corpus.
+        #[cfg(feature = "store")]
+        #[arg(long)]
+        cwe_field: Option<String>,
+
         /// Ingest preset (pre-fills text-fields, metadata-fields, etc.)
         #[cfg(feature = "store")]
         #[arg(long)]

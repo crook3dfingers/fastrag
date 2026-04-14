@@ -664,6 +664,7 @@ async fn ingest_handler(
         metadata_fields,
         metadata_types,
         array_fields,
+        cwe_field: None,
     };
 
     // 4. Build ChunkingStrategy from params.

@@ -66,7 +66,7 @@ pub fn index_jsonl(
             .unwrap_or_default()
             .as_secs();
 
-        let manifest = CorpusManifest::new(
+        let mut manifest = CorpusManifest::new(
             embedder.identity(),
             Canary {
                 text_version: 1,
@@ -75,6 +75,11 @@ pub fn index_jsonl(
             now_secs,
             chunking_to_manifest(chunking),
         );
+        if let Some(field) = config.cwe_field.clone() {
+            manifest.cwe_field = Some(field);
+            manifest.cwe_taxonomy_version =
+                Some(fastrag_cwe::data::embedded().version().to_string());
+        }
 
         // Seed the schema with all fields seen in this batch so Tantivy
         // creates the necessary columns at index-creation time.
@@ -223,6 +228,7 @@ mod tests {
             metadata_fields: vec!["severity".into()],
             metadata_types: BTreeMap::new(),
             array_fields: vec![],
+            cwe_field: None,
         }
     }
 

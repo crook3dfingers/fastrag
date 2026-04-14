@@ -177,6 +177,8 @@ async fn main() {
             #[cfg(feature = "store")]
             array_fields,
             #[cfg(feature = "store")]
+            cwe_field,
+            #[cfg(feature = "store")]
             preset,
         } => {
             #[cfg(feature = "contextual")]
@@ -238,6 +240,9 @@ async fn main() {
                                     .map(|c| c.array_fields.clone())
                                     .unwrap_or_default()
                             }),
+                            cwe_field: cwe_field
+                                .clone()
+                                .or_else(|| base.as_ref().and_then(|c| c.cwe_field.clone())),
                         };
                         let chunking = chunking_from_args(
                             chunk_strategy,
