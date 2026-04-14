@@ -1,0 +1,20 @@
+[package]
+name = "fastrag-cwe"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+quick-xml = { version = "0.37", optional = true }
+
+[[bin]]
+name = "compile-taxonomy"
+path = "src/bin/compile_taxonomy.rs"
+required-features = ["compile-tool"]
+
+[features]
+compile-tool = ["dep:quick-xml"]
