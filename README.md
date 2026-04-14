@@ -307,21 +307,63 @@ The HTTP server accepts `?rerank=off` and `?over_fetch=N` query parameters to co
 
 ### Hybrid Retrieval
 
-Queries combine BM25 keyword search (via Tantivy) with dense vector search, fused using Reciprocal Rank Fusion (k=60). CVE/CWE identifiers in the query text are extracted and matched exactly against the Tantivy index, with exact hits prepended before fused results.
-
-Hybrid mode is on by default. Pass `--dense-only` to skip BM25 and use dense vector search only.
+Opt in to BM25 + dense retrieval fused via Reciprocal Rank Fusion (k=60) with `--hybrid`:
 
 ```bash
-# Default hybrid query (BM25 + dense + RRF)
-fastrag query "CVE-2024-1234 buffer overflow" --corpus ./corpus
-
-# Dense-only mode (skip Tantivy/BM25)
-fastrag query "buffer overflow" --corpus ./corpus --dense-only
+fastrag query "CVE-2024-1234 buffer overflow" --corpus ./corpus --hybrid
 ```
 
-The HTTP server accepts `?mode=dense-only` to bypass hybrid for a single request, or start the server with `--dense-only` to disable it globally.
+Dense-only is the default. CVE and CWE identifiers in the query string are extracted and matched exactly against the Tantivy index, with exact hits prepended before the fused results.
 
-Old corpora indexed before hybrid support load without a Tantivy index and fall back to dense-only with a warning. Re-index to enable BM25.
+Tuning:
+
+| Flag | Default | Purpose |
+|---|---|---|
+| `--hybrid` | off | Enable BM25 + dense RRF fusion |
+| `--rrf-k <int>` | 60 | RRF k parameter |
+| `--rrf-overfetch <int>` | 4 | Per-source candidate overfetch factor |
+
+The HTTP `/query` endpoint accepts `?hybrid=true`, `?rrf_k=60`, `?rrf_overfetch=4`. The MCP `search_corpus` tool accepts identical fields in its params object.
+
+Corpora indexed before hybrid support load without a Tantivy index and fall back to dense-only with a warning. Re-index to enable BM25.
+
+### Temporal Decay
+
+For corpora where freshness matters (security advisories, news, changelogs), layer a recency decay on the fused scores. Pass `--time-decay-field <name>` with the metadata field carrying a `YYYY-MM-DD` date:
+
+```bash
+fastrag query "latest openssl advisory" \
+    --corpus ./corpus \
+    --time-decay-field published_date \
+    --time-decay-halflife 30d
+```
+
+A decay factor in `[α, 1.0]` is computed per chunk from its age, then applied to the fused score. α is the floor set by `--time-decay-weight`. Passing any `--time-decay-*` flag implies `--hybrid`.
+
+| Flag | Default | Purpose |
+|---|---|---|
+| `--time-decay-field <name>` | — | Metadata date field; required to enable decay |
+| `--time-decay-halflife <humantime>` | `30d` | Half-life for the exponential decay (`7d`, `1y`, …) |
+| `--time-decay-weight <float>` | `0.3` | Floor α — the minimum factor very old docs converge to |
+| `--time-decay-dateless-prior <float>` | `0.5` | Factor applied to chunks with no date |
+| `--time-decay-blend <mode>` | `multiplicative` | `multiplicative` multiplies the decay factor into the fused score; `additive` does a convex mix on min-max-normalised scores |
+
+**Multiplicative blend:**
+
+```text
+factor = α + (1 - α) · exp(-ln 2 · age_days / halflife_days)
+score' = fused · factor
+```
+
+**Additive blend** performs a convex mix with weight `1 − α`:
+
+```text
+score' = α · norm(fused) + (1 − α) · factor
+```
+
+Date metadata is typed at ingest time through JSONL ingestion with `--metadata-types published_date=date`. Chunks missing the field fall back to `--time-decay-dateless-prior`.
+
+The HTTP `/query` endpoint accepts every flag as a snake-cased query-string param: `?time_decay_field=published_date&time_decay_halflife=30d&time_decay_weight=0.3&time_decay_blend=additive`. The MCP `search_corpus` tool accepts the same names in its params object. Invalid values (e.g. `time_decay_blend=bogus`) return HTTP 400.
 
 ### Contextual Retrieval (optional)
 

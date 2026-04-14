@@ -45,6 +45,11 @@ cargo test -p fastrag-cwe --features compile-tool                              #
 cargo test -p fastrag --test cwe_expansion --features retrieval                # CWE hierarchy expansion end-to-end
 cargo test -p fastrag-cli --test cwe_expand_e2e --features "retrieval,store"   # CLI --cwe-expand e2e
 cargo test -p fastrag-cli --test cwe_expand_http_e2e --features "retrieval,store"  # HTTP cwe_expand param e2e
+cargo test -p fastrag --features retrieval --test hybrid_retrieval    # Hybrid BM25 + dense RRF integration test
+cargo test -p fastrag --features retrieval --test temporal_decay      # Temporal decay integration test (Date-typed metadata)
+cargo test -p fastrag-cli --features retrieval --test hybrid_e2e      # CLI --hybrid e2e (jsonl ingest + query)
+cargo test -p fastrag-cli --features retrieval --test temporal_decay_e2e        # CLI --time-decay-* e2e + error paths
+cargo test -p fastrag-cli --features retrieval --test temporal_decay_http_e2e   # HTTP GET /query decay params + 400 handling
 cargo clippy --workspace --all-targets --features retrieval,rerank,hybrid,contextual,eval,nvd,hygiene -- -D warnings  # Full lint gate with hygiene
 cargo fmt --check            # Format check
 cargo build --release        # Release build (binary at target/release/fastrag)
