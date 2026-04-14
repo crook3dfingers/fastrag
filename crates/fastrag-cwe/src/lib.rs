@@ -3,3 +3,5 @@
 
 pub mod data;
 pub mod taxonomy;
+
+pub use taxonomy::{Taxonomy, TaxonomyError};
