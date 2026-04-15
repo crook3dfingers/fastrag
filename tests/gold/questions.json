@@ -1799,6 +1799,460 @@
         "style": "identifier",
         "temporal_intent": "historical"
       }
+    },
+    {
+      "id": "q-new-recency-001",
+      "question": "What are the latest remote code execution vulnerabilities in Log4j2?",
+      "must_contain_cve_ids": [
+        "CVE-2021-44228"
+      ],
+      "must_contain_terms": [
+        "Log4j",
+        "remote code execution"
+      ],
+      "notes": "new-2026: latest+RCE, targets log4shell doc",
+      "axes": {
+        "style": "mixed",
+        "temporal_intent": "recency_seeking"
+      }
+    },
+    {
+      "id": "q-new-recency-002",
+      "question": "Show the newest known-exploited advisory for BlueKeep.",
+      "must_contain_cve_ids": [
+        "CVE-2019-0708"
+      ],
+      "must_contain_terms": [
+        "BlueKeep",
+        "KEV"
+      ],
+      "notes": "new-2026: newest+KEV, targets kev-bluekeep doc",
+      "axes": {
+        "style": "mixed",
+        "temporal_intent": "recency_seeking"
+      }
+    },
+    {
+      "id": "q-new-recency-003",
+      "question": "Which zero-day vulnerabilities are currently being exploited against Microsoft Exchange?",
+      "must_contain_cve_ids": [
+        "CVE-2021-26855"
+      ],
+      "must_contain_terms": [
+        "Exchange",
+        "ProxyLogon"
+      ],
+      "notes": "new-2026: zero-day+currently, targets proxylogon doc",
+      "axes": {
+        "style": "mixed",
+        "temporal_intent": "recency_seeking"
+      }
+    },
+    {
+      "id": "q-new-recency-004",
+      "question": "Any recent deserialization RCE advisories?",
+      "must_contain_cve_ids": [],
+      "must_contain_terms": [
+        "deserialization",
+        "remote code execution"
+      ],
+      "notes": "new-2026: recent+RCE, conceptual phrasing",
+      "axes": {
+        "style": "conceptual",
+        "temporal_intent": "recency_seeking"
+      }
+    },
+    {
+      "id": "q-new-recency-005",
+      "question": "What is the current guidance on the xz-utils backdoor?",
+      "must_contain_cve_ids": [
+        "CVE-2024-3094"
+      ],
+      "must_contain_terms": [
+        "xz",
+        "backdoor"
+      ],
+      "notes": "new-2026: current+identifier, targets xz-backdoor doc",
+      "axes": {
+        "style": "mixed",
+        "temporal_intent": "recency_seeking"
+      }
+    },
+    {
+      "id": "q-new-recency-006",
+      "question": "Recently disclosed OpenSSH pre-auth vulnerabilities.",
+      "must_contain_cve_ids": [
+        "CVE-2024-6387"
+      ],
+      "must_contain_terms": [
+        "OpenSSH",
+        "regreSSHion"
+      ],
+      "notes": "new-2026: recently+identifier, targets regresshion doc",
+      "axes": {
+        "style": "mixed",
+        "temporal_intent": "recency_seeking"
+      }
+    },
+    {
+      "id": "q-new-recency-007",
+      "question": "Newest path traversal vulnerabilities being exploited in the wild.",
+      "must_contain_cve_ids": [],
+      "must_contain_terms": [
+        "path traversal",
+        "exploitation"
+      ],
+      "notes": "new-2026: newest+exploited, conceptual phrasing",
+      "axes": {
+        "style": "conceptual",
+        "temporal_intent": "recency_seeking"
+      }
+    },
+    {
+      "id": "q-new-recency-008",
+      "question": "Latest SQL injection vulnerability in MOVEit Transfer.",
+      "must_contain_cve_ids": [
+        "CVE-2023-34362"
+      ],
+      "must_contain_terms": [
+        "MOVEit",
+        "SQL injection"
+      ],
+      "notes": "new-2026: latest+identifier, targets moveit doc",
+      "axes": {
+        "style": "mixed",
+        "temporal_intent": "recency_seeking"
+      }
+    },
+    {
+      "id": "q-new-recency-009",
+      "question": "What WebP decoder flaw is currently under active exploitation?",
+      "must_contain_cve_ids": [
+        "CVE-2023-4863"
+      ],
+      "must_contain_terms": [
+        "WebP",
+        "heap"
+      ],
+      "notes": "new-2026: currently+identifier, targets webp-heap doc",
+      "axes": {
+        "style": "mixed",
+        "temporal_intent": "recency_seeking"
+      }
+    },
+    {
+      "id": "q-new-recency-010",
+      "question": "Show the most recent Follina-style Office URL handler exploits.",
+      "must_contain_cve_ids": [
+        "CVE-2022-30190"
+      ],
+      "must_contain_terms": [
+        "Follina",
+        "MSDT"
+      ],
+      "notes": "new-2026: most recent+identifier, targets follina doc",
+      "axes": {
+        "style": "mixed",
+        "temporal_intent": "recency_seeking"
+      }
+    },
+    {
+      "id": "q-new-concept-001",
+      "question": "Which vulnerabilities allow bypassing authentication entirely?",
+      "must_contain_cve_ids": [],
+      "must_contain_terms": [
+        "authentication bypass"
+      ],
+      "notes": "new-2026: concept lookup across auth-bypass entries",
+      "axes": {
+        "style": "conceptual",
+        "temporal_intent": "neutral"
+      }
+    },
+    {
+      "id": "q-new-concept-002",
+      "question": "How do deserialization flaws enable remote code execution?",
+      "must_contain_cve_ids": [],
+      "must_contain_terms": [
+        "deserialization",
+        "remote code execution"
+      ],
+      "notes": "new-2026: concept lookup, targets cwe-502",
+      "axes": {
+        "style": "conceptual",
+        "temporal_intent": "neutral"
+      }
+    },
+    {
+      "id": "q-new-concept-003",
+      "question": "What distinguishes heap-based from stack-based buffer overflows?",
+      "must_contain_cve_ids": [],
+      "must_contain_terms": [
+        "heap",
+        "buffer overflow"
+      ],
+      "notes": "new-2026: concept lookup, targets cwe-787/cwe-125",
+      "axes": {
+        "style": "conceptual",
+        "temporal_intent": "neutral"
+      }
+    },
+    {
+      "id": "q-new-concept-004",
+      "question": "How does command injection differ from code injection?",
+      "must_contain_cve_ids": [],
+      "must_contain_terms": [
+        "command injection",
+        "code injection"
+      ],
+      "notes": "new-2026: concept lookup, targets cwe-78/cwe-94",
+      "axes": {
+        "style": "conceptual",
+        "temporal_intent": "neutral"
+      }
+    },
+    {
+      "id": "q-new-concept-005",
+      "question": "Describe the class of vulnerabilities that let attackers forge server-side requests.",
+      "must_contain_cve_ids": [],
+      "must_contain_terms": [
+        "server-side request forgery",
+        "SSRF"
+      ],
+      "notes": "new-2026: concept+describe, targets ssrf-proxy",
+      "axes": {
+        "style": "conceptual",
+        "temporal_intent": "neutral"
+      }
+    },
+    {
+      "id": "q-new-concept-006",
+      "question": "Why are hardcoded credentials considered a systemic weakness?",
+      "must_contain_cve_ids": [],
+      "must_contain_terms": [
+        "hardcoded credentials"
+      ],
+      "notes": "new-2026: concept+why, targets cwe-798",
+      "axes": {
+        "style": "conceptual",
+        "temporal_intent": "neutral"
+      }
+    },
+    {
+      "id": "q-new-concept-007",
+      "question": "Explain how integer overflows lead to memory corruption.",
+      "must_contain_cve_ids": [],
+      "must_contain_terms": [
+        "integer overflow",
+        "memory corruption"
+      ],
+      "notes": "new-2026: concept+explain, targets cwe-190",
+      "axes": {
+        "style": "conceptual",
+        "temporal_intent": "neutral"
+      }
+    },
+    {
+      "id": "q-new-concept-008",
+      "question": "What makes null-pointer dereference different from use-after-free?",
+      "must_contain_cve_ids": [],
+      "must_contain_terms": [
+        "null",
+        "use-after-free"
+      ],
+      "notes": "new-2026: concept lookup, targets cwe-476/cwe-416",
+      "axes": {
+        "style": "conceptual",
+        "temporal_intent": "neutral"
+      }
+    },
+    {
+      "id": "q-new-concept-009",
+      "question": "How can cross-site scripting be chained into account takeover?",
+      "must_contain_cve_ids": [],
+      "must_contain_terms": [
+        "cross-site scripting",
+        "XSS"
+      ],
+      "notes": "new-2026: concept+how, targets cwe-79",
+      "axes": {
+        "style": "conceptual",
+        "temporal_intent": "neutral"
+      }
+    },
+    {
+      "id": "q-new-concept-010",
+      "question": "Why does improper certificate validation enable man-in-the-middle attacks?",
+      "must_contain_cve_ids": [],
+      "must_contain_terms": [
+        "certificate validation",
+        "man-in-the-middle"
+      ],
+      "notes": "new-2026: concept+why, targets cwe-295",
+      "axes": {
+        "style": "conceptual",
+        "temporal_intent": "neutral"
+      }
+    },
+    {
+      "id": "q-new-hist-001",
+      "question": "The 2014 OpenSSL memory disclosure flaw in TLS heartbeat extension.",
+      "must_contain_cve_ids": [
+        "CVE-2014-0160"
+      ],
+      "must_contain_terms": [
+        "Heartbleed",
+        "OpenSSL"
+      ],
+      "notes": "new-2026: explicit 2014, targets heartbleed doc",
+      "axes": {
+        "style": "mixed",
+        "temporal_intent": "historical"
+      }
+    },
+    {
+      "id": "q-new-hist-002",
+      "question": "Shellshock bash parser flaw disclosed in 2014.",
+      "must_contain_cve_ids": [
+        "CVE-2014-6271"
+      ],
+      "must_contain_terms": [
+        "Shellshock",
+        "bash"
+      ],
+      "notes": "new-2026: disclosed+2014, targets shellshock doc",
+      "axes": {
+        "style": "mixed",
+        "temporal_intent": "historical"
+      }
+    },
+    {
+      "id": "q-new-hist-003",
+      "question": "EternalBlue SMB exploit from 2017.",
+      "must_contain_cve_ids": [
+        "CVE-2017-0144"
+      ],
+      "must_contain_terms": [
+        "EternalBlue",
+        "SMB"
+      ],
+      "notes": "new-2026: 2017, targets eternalblue doc",
+      "axes": {
+        "style": "mixed",
+        "temporal_intent": "historical"
+      }
+    },
+    {
+      "id": "q-new-hist-004",
+      "question": "As of 2017 guidance on Apache Struts OGNL injection.",
+      "must_contain_cve_ids": [
+        "CVE-2017-5638"
+      ],
+      "must_contain_terms": [
+        "Struts",
+        "OGNL"
+      ],
+      "notes": "new-2026: as of+2017, targets struts-ognl doc",
+      "axes": {
+        "style": "mixed",
+        "temporal_intent": "historical"
+      }
+    },
+    {
+      "id": "q-new-hist-005",
+      "question": "The 2020 Netlogon privilege escalation vulnerability.",
+      "must_contain_cve_ids": [
+        "CVE-2020-1472"
+      ],
+      "must_contain_terms": [
+        "Zerologon",
+        "Netlogon"
+      ],
+      "notes": "new-2026: 2020, targets zerologon doc",
+      "axes": {
+        "style": "mixed",
+        "temporal_intent": "historical"
+      }
+    },
+    {
+      "id": "q-new-hist-006",
+      "question": "PrintNightmare Windows Print Spooler RCE published in 2021.",
+      "must_contain_cve_ids": [
+        "CVE-2021-34527"
+      ],
+      "must_contain_terms": [
+        "PrintNightmare",
+        "Print Spooler"
+      ],
+      "notes": "new-2026: published+2021, targets printnightmare doc",
+      "axes": {
+        "style": "mixed",
+        "temporal_intent": "historical"
+      }
+    },
+    {
+      "id": "q-new-hist-007",
+      "question": "Spring4Shell Java framework RCE disclosed in 2022.",
+      "must_contain_cve_ids": [
+        "CVE-2022-22965"
+      ],
+      "must_contain_terms": [
+        "Spring4Shell",
+        "Spring"
+      ],
+      "notes": "new-2026: disclosed+2022, targets spring4shell doc",
+      "axes": {
+        "style": "mixed",
+        "temporal_intent": "historical"
+      }
+    },
+    {
+      "id": "q-new-hist-008",
+      "question": "The 2020 Windows CryptoAPI curve validation flaw.",
+      "must_contain_cve_ids": [
+        "CVE-2020-0601"
+      ],
+      "must_contain_terms": [
+        "CurveBall",
+        "CryptoAPI"
+      ],
+      "notes": "new-2026: 2020, targets curveball doc",
+      "axes": {
+        "style": "mixed",
+        "temporal_intent": "historical"
+      }
+    },
+    {
+      "id": "q-new-hist-009",
+      "question": "Dirty Pipe Linux kernel privilege escalation in 2022.",
+      "must_contain_cve_ids": [
+        "CVE-2022-0847"
+      ],
+      "must_contain_terms": [
+        "Dirty Pipe",
+        "Linux kernel"
+      ],
+      "notes": "new-2026: 2022, targets dirtypipe doc",
+      "axes": {
+        "style": "mixed",
+        "temporal_intent": "historical"
+      }
+    },
+    {
+      "id": "q-new-hist-010",
+      "question": "The 2022 Atlassian Confluence OGNL injection advisory.",
+      "must_contain_cve_ids": [
+        "CVE-2022-26134"
+      ],
+      "must_contain_terms": [
+        "Confluence",
+        "OGNL"
+      ],
+      "notes": "new-2026: 2022, targets confluence-ognl doc",
+      "axes": {
+        "style": "mixed",
+        "temporal_intent": "historical"
+      }
     }
   ]
 }
