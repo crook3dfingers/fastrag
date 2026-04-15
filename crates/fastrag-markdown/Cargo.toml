@@ -9,3 +9,4 @@ repository.workspace = true
 [dependencies]
 fastrag-core.workspace = true
 comrak = "0.36"
+serde_yaml = "0.9"
