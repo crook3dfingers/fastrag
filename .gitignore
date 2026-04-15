@@ -5,3 +5,10 @@
 .DS_Store
 .worktrees/
 .claude/scheduled_tasks.lock
+
+# Python client (clients/python)
+**/__pycache__/
+**/*.egg-info/
+**/.pytest_cache/
+**/.ruff_cache/
+**/.venv/
