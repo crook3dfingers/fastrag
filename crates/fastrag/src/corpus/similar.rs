@@ -85,14 +85,26 @@ pub fn similarity_search(
         .ok_or(CorpusError::EmptyEmbeddingOutput)?;
     latency.embed_us = embed_start.elapsed().as_micros() as u64;
 
-    // Fan out per corpus. Task 4 replaces this with parallel spawn_blocking.
+    // Fan out per corpus in parallel — embed happened once above.
+    use rayon::prelude::*;
+
+    let per: Vec<(String, Result<PerCorpusOutcome, CorpusError>)> = request
+        .targets
+        .par_iter()
+        .map(|(name, path)| {
+            let outcome = similarity_search_one(&vector, path, request, embedder);
+            (name.clone(), outcome)
+        })
+        .collect();
+
     let mut per_corpus: std::collections::BTreeMap<String, PerCorpusStats> =
         std::collections::BTreeMap::new();
     let mut merged_raw: Vec<(String, u64, f32)> = Vec::new();
     let mut any_truncated = false;
 
-    for (name, path) in &request.targets {
-        let outcome = similarity_search_one(&vector, path, request, embedder, &mut latency)?;
+    for (name, result) in per {
+        let outcome = result?;
+        latency.hnsw_us = latency.hnsw_us.saturating_add(outcome.hnsw_us);
         per_corpus.insert(
             name.clone(),
             PerCorpusStats {
@@ -182,6 +194,7 @@ struct PerCorpusOutcome {
     above: Vec<(u64, f32)>,
     candidates_examined: usize,
     truncated: bool,
+    hnsw_us: u64,
 }
 
 fn similarity_search_one(
@@ -189,20 +202,18 @@ fn similarity_search_one(
     corpus_path: &std::path::Path,
     request: &SimilarityRequest,
     embedder: &dyn DynEmbedderTrait,
-    latency: &mut LatencyBreakdown,
 ) -> Result<PerCorpusOutcome, CorpusError> {
     let store = fastrag_store::Store::open(corpus_path, embedder)?;
 
     let mut fetch_count = request.max_results.saturating_mul(10).max(1);
     let cap = request.overfetch_cap.max(1);
+    let mut total_hnsw_us: u64 = 0;
 
     loop {
         let n = fetch_count.min(cap);
         let hnsw_start = Instant::now();
         let candidates = store.query_dense(vector, n)?;
-        latency.hnsw_us = latency
-            .hnsw_us
-            .saturating_add(hnsw_start.elapsed().as_micros() as u64);
+        total_hnsw_us = total_hnsw_us.saturating_add(hnsw_start.elapsed().as_micros() as u64);
         let candidates_examined = candidates.len();
 
         let filtered: Vec<(u64, f32)> = match &request.filter {
@@ -221,6 +232,7 @@ fn similarity_search_one(
                 above,
                 candidates_examined,
                 truncated: false,
+                hnsw_us: total_hnsw_us,
             });
         }
         // Treat "HNSW returned fewer rows than requested" as tail-exhausted:
@@ -234,6 +246,7 @@ fn similarity_search_one(
                 above,
                 candidates_examined,
                 truncated: false,
+                hnsw_us: total_hnsw_us,
             });
         }
         if n >= cap {
@@ -241,6 +254,7 @@ fn similarity_search_one(
                 above,
                 candidates_examined,
                 truncated: true,
+                hnsw_us: total_hnsw_us,
             });
         }
         fetch_count = fetch_count.saturating_mul(2).min(cap);
@@ -263,6 +277,156 @@ mod tests {
         let pc = PerCorpusStats::default();
         let _ = pc.candidates_examined;
         let _ = pc.above_threshold;
+    }
+
+    #[cfg(feature = "store")]
+    mod fan_out_tests {
+        use super::super::*;
+        use crate::ChunkingStrategy;
+        use crate::ingest::engine::index_jsonl;
+        use crate::ingest::jsonl::JsonlIngestConfig;
+        use fastrag_embed::test_utils::MockEmbedder;
+        use std::collections::BTreeMap;
+
+        fn build_corpus_v2(docs: &[(&str, &str)]) -> (tempfile::TempDir, std::path::PathBuf) {
+            let tmp = tempfile::tempdir().unwrap();
+            let jsonl = tmp.path().join("docs.jsonl");
+            let lines: Vec<String> = docs
+                .iter()
+                .map(|(id, body)| serde_json::json!({ "id": id, "body": body }).to_string())
+                .collect();
+            std::fs::write(&jsonl, lines.join("\n")).unwrap();
+            let corpus = tmp.path().join("corpus");
+            let cfg = JsonlIngestConfig {
+                text_fields: vec!["body".into()],
+                id_field: "id".into(),
+                metadata_fields: vec![],
+                metadata_types: BTreeMap::new(),
+                array_fields: vec![],
+                cwe_field: None,
+            };
+            index_jsonl(
+                &jsonl,
+                &corpus,
+                &ChunkingStrategy::Basic {
+                    max_characters: 500,
+                    overlap: 0,
+                },
+                &MockEmbedder as &dyn fastrag_embed::DynEmbedderTrait,
+                &cfg,
+            )
+            .unwrap();
+            (tmp, corpus)
+        }
+
+        #[test]
+        fn fan_out_merges_and_stamps_corpus_on_each_hit() {
+            let (_t1, c1) = build_corpus_v2(&[("a1", "alpha"), ("b1", "beta")]);
+            let (_t2, c2) = build_corpus_v2(&[("a2", "alpha"), ("b2", "gamma")]);
+            let req = SimilarityRequest {
+                text: "alpha".into(),
+                threshold: 0.95,
+                max_results: 10,
+                targets: vec![("one".into(), c1), ("two".into(), c2)],
+                filter: None,
+                snippet_len: 0,
+                overfetch_cap: 10_000,
+            };
+            let resp = similarity_search(&MockEmbedder, &req).unwrap();
+            assert_eq!(resp.hits.len(), 2, "both corpora contribute one hit");
+            let corpora: std::collections::BTreeSet<&str> =
+                resp.hits.iter().map(|h| h.corpus.as_str()).collect();
+            assert!(corpora.contains("one"));
+            assert!(corpora.contains("two"));
+            // per_corpus populated when targets.len() > 1
+            assert_eq!(resp.stats.per_corpus.len(), 2);
+            assert!(resp.stats.per_corpus.contains_key("one"));
+            assert!(resp.stats.per_corpus.contains_key("two"));
+        }
+
+        #[test]
+        fn fan_out_embeds_once() {
+            use fastrag_embed::{DynEmbedderTrait, EmbedError, PassageText, QueryText};
+            use std::sync::Arc;
+            use std::sync::atomic::{AtomicUsize, Ordering};
+
+            struct Counting {
+                inner: MockEmbedder,
+                query_calls: Arc<AtomicUsize>,
+            }
+            impl DynEmbedderTrait for Counting {
+                fn embed_query_dyn(&self, t: &[QueryText]) -> Result<Vec<Vec<f32>>, EmbedError> {
+                    self.query_calls.fetch_add(1, Ordering::SeqCst);
+                    self.inner.embed_query_dyn(t)
+                }
+                fn embed_passage_dyn(
+                    &self,
+                    t: &[PassageText],
+                ) -> Result<Vec<Vec<f32>>, EmbedError> {
+                    self.inner.embed_passage_dyn(t)
+                }
+                fn dim(&self) -> usize {
+                    self.inner.dim()
+                }
+                fn model_id(&self) -> &'static str {
+                    self.inner.model_id()
+                }
+                fn prefix_scheme(&self) -> fastrag_embed::PrefixScheme {
+                    self.inner.prefix_scheme()
+                }
+                fn prefix_scheme_hash(&self) -> u64 {
+                    self.inner.prefix_scheme_hash()
+                }
+                fn default_batch_size(&self) -> usize {
+                    self.inner.default_batch_size()
+                }
+            }
+
+            let (_t1, c1) = build_corpus_v2(&[("a1", "alpha")]);
+            let (_t2, c2) = build_corpus_v2(&[("a2", "alpha")]);
+            let (_t3, c3) = build_corpus_v2(&[("a3", "alpha")]);
+            let query_calls = Arc::new(AtomicUsize::new(0));
+            let embedder = Counting {
+                inner: MockEmbedder,
+                query_calls: query_calls.clone(),
+            };
+            let req = SimilarityRequest {
+                text: "alpha".into(),
+                threshold: 0.5,
+                max_results: 10,
+                targets: vec![("one".into(), c1), ("two".into(), c2), ("three".into(), c3)],
+                filter: None,
+                snippet_len: 0,
+                overfetch_cap: 10_000,
+            };
+            similarity_search(&embedder, &req).unwrap();
+            assert_eq!(
+                query_calls.load(Ordering::SeqCst),
+                1,
+                "similarity_search must embed the query exactly once"
+            );
+        }
+
+        #[test]
+        fn ties_broken_deterministically() {
+            // Two corpora, each with doc "alpha". Identical cosine -> tie.
+            // Lexicographic tie-break on corpus name: "aaa" before "zzz".
+            let (_t1, c1) = build_corpus_v2(&[("x", "alpha")]);
+            let (_t2, c2) = build_corpus_v2(&[("x", "alpha")]);
+            let req = SimilarityRequest {
+                text: "alpha".into(),
+                threshold: 0.95,
+                max_results: 10,
+                targets: vec![("zzz".into(), c2), ("aaa".into(), c1)],
+                filter: None,
+                snippet_len: 0,
+                overfetch_cap: 10_000,
+            };
+            let resp = similarity_search(&MockEmbedder, &req).unwrap();
+            assert_eq!(resp.hits.len(), 2);
+            assert_eq!(resp.hits[0].corpus, "aaa");
+            assert_eq!(resp.hits[1].corpus, "zzz");
+        }
     }
 
     #[cfg(feature = "store")]
