@@ -303,12 +303,15 @@ pub enum Command {
         #[arg(long)]
         id_field: Option<String>,
 
-        /// JSONL: fields to index as typed metadata
+        /// Fields to index as typed metadata (comma-separated). Applies to
+        /// markdown frontmatter on directory ingest and JSONL records.
         #[cfg(feature = "store")]
         #[arg(long, value_delimiter = ',')]
         metadata_fields: Option<Vec<String>>,
 
-        /// JSONL: explicit type overrides (field=type, e.g. cvss_score=numeric)
+        /// Explicit type overrides (comma-separated `field=type`, e.g.
+        /// `published_date=date,cvss_score=numeric`). Applies to markdown
+        /// frontmatter on directory ingest and JSONL records.
         #[cfg(feature = "store")]
         #[arg(long, value_delimiter = ',')]
         metadata_types: Option<Vec<String>>,

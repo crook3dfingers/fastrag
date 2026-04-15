@@ -219,7 +219,7 @@ async fn main() {
                                     .map(|c| c.id_field.clone())
                                     .unwrap_or_else(|| "id".into())
                             }),
-                            metadata_fields: metadata_fields.unwrap_or_else(|| {
+                            metadata_fields: metadata_fields.clone().unwrap_or_else(|| {
                                 base.as_ref()
                                     .map(|c| c.metadata_fields.clone())
                                     .unwrap_or_default()
@@ -229,7 +229,7 @@ async fn main() {
                                 .map(|v| !v.is_empty())
                                 .unwrap_or(false)
                             {
-                                parse_metadata_types(&metadata_types.unwrap_or_default())
+                                parse_metadata_types(&metadata_types.clone().unwrap_or_default())
                             } else {
                                 base.as_ref()
                                     .map(|c| c.metadata_types.clone())
@@ -403,7 +403,38 @@ async fn main() {
                     None
                 };
 
-                match ops::index_path_with_metadata(
+                #[cfg(feature = "store")]
+                let fields_vec: Vec<String> = metadata_fields.clone().unwrap_or_default();
+                #[cfg(feature = "store")]
+                let types_map: std::collections::BTreeMap<
+                    String,
+                    fastrag_store::schema::TypedKind,
+                > = if metadata_types
+                    .as_ref()
+                    .map(|v| !v.is_empty())
+                    .unwrap_or(false)
+                {
+                    parse_metadata_types(&metadata_types.clone().unwrap_or_default())
+                } else {
+                    std::collections::BTreeMap::new()
+                };
+
+                #[cfg(feature = "store")]
+                let ingest_result = ops::index_path_with_metadata_typed(
+                    &input,
+                    &corpus,
+                    &chunking,
+                    embedder.as_ref() as &dyn DynEmbedderTrait,
+                    &base_metadata,
+                    &fields_vec,
+                    &types_map,
+                    #[cfg(feature = "contextual")]
+                    contextualize_opts,
+                    #[cfg(feature = "hygiene")]
+                    hygiene_chain.as_ref(),
+                );
+                #[cfg(not(feature = "store"))]
+                let ingest_result = ops::index_path_with_metadata(
                     &input,
                     &corpus,
                     &chunking,
@@ -413,7 +444,8 @@ async fn main() {
                     contextualize_opts,
                     #[cfg(feature = "hygiene")]
                     hygiene_chain.as_ref(),
-                ) {
+                );
+                match ingest_result {
                     Ok(stats) => {
                         println!("{}", serde_json::to_string_pretty(&stats).unwrap());
                         println!(
