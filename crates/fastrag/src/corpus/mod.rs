@@ -897,6 +897,331 @@ pub fn index_path_with_metadata(
     })
 }
 
+/// Promote a raw metadata string (from markdown frontmatter or CLI `-m`) into
+/// a typed `TypedValue` according to `kind`. Returns `None` when the raw
+/// string cannot be parsed as the requested kind.
+///
+/// `TypedKind::Array` is intentionally unsupported for flat string metadata:
+/// arrays must come from structured sources (JSONL) where element boundaries
+/// are unambiguous.
+#[cfg(feature = "store")]
+fn promote_string_to_typed(
+    raw: &str,
+    kind: fastrag_store::schema::TypedKind,
+) -> Option<fastrag_store::schema::TypedValue> {
+    use fastrag_store::schema::{TypedKind, TypedValue};
+    match kind {
+        TypedKind::String => Some(TypedValue::String(raw.to_string())),
+        TypedKind::Numeric => raw.parse::<f64>().ok().map(TypedValue::Numeric),
+        TypedKind::Bool => match raw {
+            "true" | "True" | "TRUE" => Some(TypedValue::Bool(true)),
+            "false" | "False" | "FALSE" => Some(TypedValue::Bool(false)),
+            _ => None,
+        },
+        TypedKind::Date => chrono::NaiveDate::parse_from_str(raw, "%Y-%m-%d")
+            .ok()
+            .map(TypedValue::Date),
+        TypedKind::Array => None,
+    }
+}
+
+/// Like [`index_path_with_metadata`], plus promotes named metadata fields to
+/// typed values via the same typing helpers JSONL ingest uses, and writes the
+/// result to a `fastrag_store::Store` so the Date-typed `user_fields` become
+/// consumable by the temporal-decay and filter paths.
+///
+/// When `metadata_fields` is empty, this function delegates to the legacy
+/// `HnswIndex`-backed [`index_path_with_metadata`] for backward compatibility.
+///
+/// Metadata resolution precedence (last wins): CLI `base_metadata` → sidecar
+/// `<path>.meta.json` → parser-emitted `Document.metadata.extra` (markdown
+/// frontmatter).
+#[cfg(feature = "store")]
+#[allow(clippy::too_many_arguments)]
+pub fn index_path_with_metadata_typed(
+    input: &Path,
+    corpus_dir: &Path,
+    chunking: &ChunkingStrategy,
+    embedder: &dyn DynEmbedderTrait,
+    base_metadata: &std::collections::BTreeMap<String, String>,
+    metadata_fields: &[String],
+    metadata_types: &std::collections::BTreeMap<String, fastrag_store::schema::TypedKind>,
+    #[cfg(feature = "contextual")] contextualize: Option<ContextualizeOptions<'_>>,
+    #[cfg(feature = "hygiene")] hygiene: Option<&crate::hygiene::HygieneChain>,
+) -> Result<CorpusIndexStats, CorpusError> {
+    if metadata_fields.is_empty() {
+        return index_path_with_metadata(
+            input,
+            corpus_dir,
+            chunking,
+            embedder,
+            base_metadata,
+            #[cfg(feature = "contextual")]
+            contextualize,
+            #[cfg(feature = "hygiene")]
+            hygiene,
+        );
+    }
+
+    index_store_path_inner(
+        input,
+        corpus_dir,
+        chunking,
+        embedder,
+        base_metadata,
+        metadata_fields,
+        metadata_types,
+        #[cfg(feature = "contextual")]
+        contextualize,
+        #[cfg(feature = "hygiene")]
+        hygiene,
+    )
+}
+
+/// Store-backed directory ingest. Walks `input`, parses each document (markdown
+/// parsers surface YAML frontmatter into `Document.metadata.extra`), chunks,
+/// embeds, promotes the requested fields to typed values, and writes
+/// `ChunkRecord`s into a `fastrag_store::Store`.
+///
+/// Re-ingest is deduplicated per file by blake3 content-hash against the
+/// `external_id = relative_path`. Unchanged files are skipped; changed files
+/// delete+replace all of their prior chunks.
+#[cfg(feature = "store")]
+#[allow(clippy::too_many_arguments)]
+fn index_store_path_inner(
+    input: &Path,
+    corpus_dir: &Path,
+    chunking: &ChunkingStrategy,
+    embedder: &dyn DynEmbedderTrait,
+    base_metadata: &std::collections::BTreeMap<String, String>,
+    metadata_fields: &[String],
+    metadata_types: &std::collections::BTreeMap<String, fastrag_store::schema::TypedKind>,
+    #[cfg(feature = "contextual")] mut contextualize: Option<ContextualizeOptions<'_>>,
+    #[cfg(feature = "hygiene")] _hygiene: Option<&crate::hygiene::HygieneChain>,
+) -> Result<CorpusIndexStats, CorpusError> {
+    use crate::corpus::incremental::walk_for_plan;
+    use fastrag_embed::{CANARY_TEXT, Canary, PassageText};
+    use fastrag_store::ChunkRecord;
+    use fastrag_store::schema::{DynamicSchema, FieldDef, TypedKind};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let (root_abs, walked) = walk_for_plan(input)?;
+    if walked.is_empty() && !corpus_dir.join("schema.json").exists() {
+        return Err(CorpusError::NoParseableFiles(input.to_path_buf()));
+    }
+
+    // Build initial schema from the requested fields. Fields without an
+    // explicit type default to String, mirroring JSONL's typing conservatism.
+    let mut initial_schema = DynamicSchema::new();
+    for field in metadata_fields {
+        let typed = metadata_types
+            .get(field)
+            .copied()
+            .unwrap_or(TypedKind::String);
+        initial_schema.merge(FieldDef {
+            name: field.clone(),
+            typed,
+            indexed: true,
+            stored: true,
+            positions: false,
+        })?;
+    }
+
+    let schema_path = corpus_dir.join("schema.json");
+    let mut store = if schema_path.exists() {
+        fastrag_store::Store::open(corpus_dir, embedder)?
+    } else {
+        let canary_vec = embedder
+            .embed_passage_dyn(&[PassageText::new(CANARY_TEXT)])
+            .map_err(|e| CorpusError::Embed(e.to_string()))?
+            .into_iter()
+            .next()
+            .ok_or(CorpusError::EmptyEmbeddingOutput)?;
+        let manifest = CorpusManifest::new(
+            embedder.identity(),
+            Canary {
+                text_version: 1,
+                vector: canary_vec,
+            },
+            current_unix_seconds(),
+            manifest_chunking_strategy_from(chunking),
+        );
+        fastrag_store::Store::create(corpus_dir, manifest, initial_schema)?
+    };
+
+    let mut id_counter: u64 = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos() as u64;
+
+    #[cfg(feature = "contextual")]
+    let mut contextualize_totals = ContextualizeStats::default();
+
+    let mut files_new: usize = 0;
+    let mut files_changed: usize = 0;
+    let mut files_unchanged: usize = 0;
+    let mut chunks_added: usize = 0;
+    let mut chunks_removed: usize = 0;
+
+    for wf in &walked {
+        let external_id = wf.rel_path.to_string_lossy().into_owned();
+        let content_hash = fastrag_index::hash::hash_file(&wf.abs_path)?;
+
+        match store.content_hash_for(&external_id)?.as_deref() {
+            Some(h) if h == content_hash => {
+                files_unchanged += 1;
+                continue;
+            }
+            Some(_) => {
+                let removed = store.delete_by_external_id(&external_id)?;
+                chunks_removed += removed.len();
+                files_changed += 1;
+            }
+            None => {
+                files_new += 1;
+            }
+        }
+
+        let docs = load_documents(&wf.abs_path)?;
+
+        for doc in &docs {
+            // Merge metadata: CLI base → sidecar → parser-emitted frontmatter.
+            let mut file_metadata = base_metadata.clone();
+            let sidecar = sidecar_path_for(&wf.abs_path);
+            if sidecar.exists() {
+                file_metadata.extend(load_metadata_sidecar(&sidecar)?);
+            }
+            for (k, v) in &doc.metadata.extra {
+                file_metadata.insert(k.clone(), v.clone());
+            }
+
+            // Promote named fields to typed values.
+            let typed_metadata: Vec<(String, fastrag_store::schema::TypedValue)> = metadata_fields
+                .iter()
+                .filter_map(|field| {
+                    let raw = file_metadata.get(field)?;
+                    let kind = metadata_types.get(field).copied().unwrap_or(TypedKind::String);
+                    promote_string_to_typed(raw, kind).map(|tv| (field.clone(), tv))
+                })
+                .collect();
+
+            #[allow(unused_mut)]
+            let mut chunks = chunk_document(doc, chunking);
+
+            #[cfg(feature = "contextual")]
+            if let Some(opts) = contextualize.as_mut() {
+                let doc_title: String = doc_title_from(doc).unwrap_or_default();
+                let stats = fastrag_context::run_contextualize_stage(
+                    opts.contextualizer,
+                    opts.cache,
+                    &doc_title,
+                    &mut chunks,
+                    opts.strict,
+                )
+                .map_err(|e| CorpusError::Embed(format!("contextualize: {e}")))?;
+                contextualize_totals.ok += stats.ok;
+                contextualize_totals.fallback += stats.failed;
+            }
+
+            if chunks.is_empty() {
+                continue;
+            }
+
+            let texts: Vec<&str> = chunks
+                .iter()
+                .map(|c| {
+                    #[cfg(feature = "contextual")]
+                    {
+                        c.contextualized_text.as_deref().unwrap_or(c.text.as_str())
+                    }
+                    #[cfg(not(feature = "contextual"))]
+                    {
+                        c.text.as_str()
+                    }
+                })
+                .collect();
+
+            let passages: Vec<PassageText> =
+                texts.iter().map(|t| PassageText::new(*t)).collect();
+            let vectors = embedder
+                .embed_passage_dyn(&passages)
+                .map_err(|e| CorpusError::Embed(e.to_string()))?;
+            if vectors.len() != chunks.len() {
+                return Err(CorpusError::EmbeddingOutputMismatch {
+                    expected: chunks.len(),
+                    got: vectors.len(),
+                });
+            }
+
+            let source_path = wf.abs_path.to_string_lossy().into_owned();
+            let records: Vec<ChunkRecord> = chunks
+                .iter()
+                .zip(vectors.into_iter())
+                .enumerate()
+                .map(|(i, (chunk, vector))| {
+                    let id = id_counter;
+                    id_counter = id_counter.wrapping_add(1);
+                    ChunkRecord {
+                        id,
+                        external_id: external_id.clone(),
+                        content_hash: content_hash.clone(),
+                        chunk_index: i,
+                        source_path: source_path.clone(),
+                        source_json: None,
+                        chunk_text: chunk.text.clone(),
+                        vector,
+                        user_fields: typed_metadata.clone(),
+                    }
+                })
+                .collect();
+
+            chunks_added += records.len();
+            store.add_records(records)?;
+        }
+    }
+
+    // Stamp contextualizer provenance on the manifest if any ran.
+    #[cfg(feature = "contextual")]
+    if let Some(opts) = contextualize.as_ref() {
+        let mut manifest = store.manifest().clone();
+        manifest.contextualizer = Some(fastrag_index::ContextualizerManifest {
+            model_id: opts.contextualizer.model_id().to_string(),
+            prompt_version: opts.contextualizer.prompt_version(),
+            prompt_hash: fastrag_context::prompt::prompt_hash_hex(),
+        });
+        store.replace_manifest(manifest);
+    }
+
+    store.save()?;
+
+    let manifest = store.manifest().clone();
+    let chunk_count = store.live_count();
+
+    Ok(CorpusIndexStats {
+        corpus_dir: corpus_dir.to_path_buf(),
+        input_dir: root_abs,
+        files_indexed: files_new + files_changed,
+        chunk_count,
+        manifest,
+        files_unchanged,
+        files_changed,
+        files_new,
+        files_deleted: 0,
+        chunks_added,
+        chunks_removed,
+        #[cfg(feature = "contextual")]
+        chunks_contextualized: contextualize_totals.ok,
+        #[cfg(not(feature = "contextual"))]
+        chunks_contextualized: 0,
+        #[cfg(feature = "contextual")]
+        chunks_contextualize_fallback: contextualize_totals.fallback,
+        #[cfg(not(feature = "contextual"))]
+        chunks_contextualize_fallback: 0,
+        #[cfg(feature = "hygiene")]
+        hygiene: crate::hygiene::HygieneStats::default(),
+    })
+}
+
 pub fn query_corpus(
     corpus_dir: &Path,
     query: &str,
