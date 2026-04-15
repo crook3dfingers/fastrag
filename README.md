@@ -415,6 +415,57 @@ Hybrid retrieval, temporal decay, CWE expansion, and reranking are rejected with
 
 `truncated: true` means the adaptive overfetch hit the server cap before exhausting the above-threshold tail. Raise `--similar-overfetch-cap` on `serve-http` when this occurs on large corpora.
 
+**Dedup pipeline recipe.** Vulnerability management systems (VAMS and similar) can wire `/similar` into the finding-ingest path to collapse near-duplicates without running a top-K query plus post-filter.
+
+1. **Ingest existing findings as a dense corpus.** The record's embeddable text is typically a concatenation of `title`, `description`, and canonical location (file path, endpoint, function). Metadata carries the identifiers you want returned (finding id, source tool, severity, CWE, detection date).
+
+   ```bash
+   fastrag index findings.jsonl \
+       --corpus /var/lib/fastrag/vams-findings \
+       --text-fields title,description,location \
+       --id-field finding_id \
+       --metadata-fields source_tool,severity,cwe_id,detected_at \
+       --metadata-types severity=enum,cwe_id=int,detected_at=date
+   ```
+
+2. **On every new finding, POST `/similar`** before inserting:
+
+   ```json
+   POST /similar
+   Content-Type: application/json
+
+   {
+     "text": "SQL injection in /api/v1/login — sink: execute(user_input) — semgrep:tainted-sql-string",
+     "threshold": 0.92,
+     "max_results": 5,
+     "corpus": "vams-findings",
+     "filter": "severity in (HIGH, CRITICAL)",
+     "fields": "include:finding_id,source_tool,detected_at"
+   }
+   ```
+
+   Non-empty `hits[]` indicates candidate merges. A typical policy: `cosine_similarity >= 0.95` is a hard duplicate, `0.92–0.95` routes to human review. Empty `hits[]` means the finding is novel — insert the record and then `POST /ingest` to add it to the corpus. `truncated: true` means the adaptive overfetch hit the cap before exhausting the above-threshold tail; raise `--similar-overfetch-cap` on `serve-http` or narrow `filter`.
+
+3. **Cross-engagement pattern matching.** Fan out over per-tenant corpora to surface the same vulnerability across client engagements:
+
+   ```json
+   POST /similar
+   Headers:
+     X-Fastrag-Tenant: research-team
+     Authorization: Bearer <token>
+
+   {
+     "text": "Prototype pollution via unsanitised Object.assign merge",
+     "threshold": 0.88,
+     "max_results": 20,
+     "corpora": ["acme-q1", "acme-q2", "globex-q1"]
+   }
+   ```
+
+   The tenant header is AND-ed into any supplied `filter` before the threshold cut, scoping the fan-out to records the caller owns.
+
+Tune thresholds on a labelled sample of near-duplicates before promoting a policy — cosine distributions vary by corpus size, chunk length, and embedder.
+
 **Threshold portability caveat:** cosine thresholds are specific to an embedder model. A `0.85` threshold for `bge-small` is not comparable to a `0.85` threshold for `text-embedding-3-small`. Version thresholds per embedder.
 
 ### Contextual Retrieval (optional)
@@ -602,6 +653,12 @@ The `serve-http` subcommand exposes a small operational surface for production u
 |----------|-------------|
 | `GET /health` | Liveness probe — returns `{"status":"ok"}` |
 | `GET /query?q=...&top_k=N` | Semantic corpus search |
+| `POST /batch-query` | Batched queries in one request; supports cross-corpus federation |
+| `POST /similar` | Raw-cosine threshold filtering for dedup and near-duplicate detection |
+| `POST /ingest` | Append JSONL records to a corpus |
+| `DELETE /ingest/:id` | Remove a record by its external id |
+| `GET /corpora` | List registered corpora (tenant-scoped when configured) |
+| `GET /stats` | Corpus size, entry count, embedder identity |
 | `GET /metrics` | Prometheus text-format metrics |
 
 ### Metrics
@@ -610,6 +667,8 @@ The `serve-http` subcommand exposes a small operational surface for production u
 |------|------|-------------|
 | `fastrag_query_total` | counter | Total `/query` requests served |
 | `fastrag_query_duration_seconds` | histogram | `/query` latency distribution |
+| `fastrag_similar_total` | counter | Total `/similar` requests served |
+| `fastrag_similar_duration_seconds` | histogram | `/similar` latency distribution |
 | `fastrag_index_entries` | gauge | Number of entries in the loaded corpus |
 
 ### Authentication
