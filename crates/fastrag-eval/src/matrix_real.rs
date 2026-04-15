@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Mutex;
 use std::time::Instant;
 
 use std::time::Duration;
@@ -28,11 +29,18 @@ use fastrag_store::Store;
 use crate::error::EvalError;
 use crate::matrix::{ConfigVariant, CorpusDriver};
 
+/// Cross-encoder score keyed by (is_raw_store, question, doc_id).
+/// The reranker score for (query_text, doc_text) is variant-independent,
+/// so Primary / DenseOnly / TemporalOn share cached scores on ctx_store,
+/// and NoContextual has its own namespace on raw_store.
+type RerankCache = Mutex<HashMap<(bool, String, u64), f32>>;
+
 pub struct RealCorpusDriver<'a> {
     ctx_store: Store,
     raw_store: Store,
     pub embedder: &'a dyn DynEmbedderTrait,
     pub reranker: &'a dyn Reranker,
+    rerank_cache: RerankCache,
 }
 
 impl<'a> RealCorpusDriver<'a> {
@@ -53,6 +61,7 @@ impl<'a> RealCorpusDriver<'a> {
             raw_store,
             embedder,
             reranker,
+            rerank_cache: Mutex::new(HashMap::new()),
         })
     }
 }
@@ -89,8 +98,9 @@ impl CorpusDriver for RealCorpusDriver<'_> {
                     overfetch_factor: 3,
                     temporal: None,
                 };
-                let fused = query_hybrid(store, question, query_vector, over_fetch, &opts, breakdown)
-                    .map_err(|e| EvalError::Runner(format!("hybrid search: {e}")))?;
+                let fused =
+                    query_hybrid(store, question, query_vector, over_fetch, &opts, breakdown)
+                        .map_err(|e| EvalError::Runner(format!("hybrid search: {e}")))?;
                 fused.into_iter().map(|s| (s.id, s.score)).collect()
             }
             ConfigVariant::DenseOnly => {
@@ -115,8 +125,9 @@ impl CorpusDriver for RealCorpusDriver<'_> {
                         now: Utc::now(),
                     }),
                 };
-                let fused = query_hybrid(store, question, query_vector, over_fetch, &opts, breakdown)
-                    .map_err(|e| EvalError::Runner(format!("hybrid+decay search: {e}")))?;
+                let fused =
+                    query_hybrid(store, question, query_vector, over_fetch, &opts, breakdown)
+                        .map_err(|e| EvalError::Runner(format!("hybrid+decay search: {e}")))?;
                 fused.into_iter().map(|s| (s.id, s.score)).collect()
             }
         };
@@ -147,6 +158,7 @@ impl CorpusDriver for RealCorpusDriver<'_> {
         );
 
         let mut ordered_texts: Vec<String> = if needs_rerank {
+            let is_raw = matches!(variant, ConfigVariant::NoContextual);
             let rerank_input: Vec<RerankHit> = scored
                 .iter()
                 .filter_map(|(id, score)| {
@@ -157,13 +169,45 @@ impl CorpusDriver for RealCorpusDriver<'_> {
                     })
                 })
                 .collect();
+
+            let mut cached: Vec<(String, f32)> = Vec::new();
+            let mut misses: Vec<RerankHit> = Vec::with_capacity(rerank_input.len());
+            {
+                let cache = self.rerank_cache.lock().expect("rerank cache poisoned");
+                for hit in rerank_input {
+                    let key = (is_raw, question.to_string(), hit.id);
+                    if let Some(&score) = cache.get(&key) {
+                        cached.push((hit.chunk_text, score));
+                    } else {
+                        misses.push(hit);
+                    }
+                }
+            }
+
             let t = Instant::now();
-            let reranked = self
-                .reranker
-                .rerank(question, rerank_input)
-                .map_err(|e| EvalError::Runner(format!("rerank: {e}")))?;
+            let reranked_misses = if misses.is_empty() {
+                Vec::new()
+            } else {
+                let out = self
+                    .reranker
+                    .rerank(question, misses)
+                    .map_err(|e| EvalError::Runner(format!("rerank: {e}")))?;
+                let mut cache = self.rerank_cache.lock().expect("rerank cache poisoned");
+                for rh in &out {
+                    cache.insert((is_raw, question.to_string(), rh.id), rh.score);
+                }
+                out
+            };
             breakdown.rerank_us = t.elapsed().as_micros() as u64;
-            reranked.into_iter().map(|rh| rh.chunk_text).collect()
+
+            let mut all: Vec<(String, f32)> = cached;
+            all.extend(
+                reranked_misses
+                    .into_iter()
+                    .map(|rh| (rh.chunk_text, rh.score)),
+            );
+            all.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            all.into_iter().map(|(text, _)| text).collect()
         } else {
             scored
                 .iter()

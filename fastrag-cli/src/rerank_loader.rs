@@ -81,6 +81,13 @@ fn load_llama_cpp() -> Result<Box<dyn Reranker>, RerankLoaderError> {
                 "--pooling".to_string(),
                 "rank".to_string(),
                 "--rerank".to_string(),
+                "--threads-batch".to_string(),
+                num_cpus_for_batch(),
+                "--parallel".to_string(),
+                "2".to_string(),
+                "--cont-batching".to_string(),
+                "--ubatch-size".to_string(),
+                "512".to_string(),
             ],
             skip_version_check: false,
         };
@@ -88,6 +95,18 @@ fn load_llama_cpp() -> Result<Box<dyn Reranker>, RerankLoaderError> {
         let reranker = BgeRerankerV2M3Llama::load(cfg)?;
         Ok(Box::new(reranker))
     }
+}
+
+#[cfg(feature = "rerank-llama")]
+fn num_cpus_for_batch() -> String {
+    // Use all available logical cores for prompt/batch processing — this
+    // is the hot path for cross-encoder reranking. Cap conservatively in
+    // case this runs on very large boxes where oversubscription hurts.
+    let n = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4)
+        .min(16);
+    n.to_string()
 }
 
 #[cfg(feature = "rerank-llama")]
