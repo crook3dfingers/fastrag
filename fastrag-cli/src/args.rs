@@ -631,6 +631,11 @@ pub enum Command {
         #[arg(long, default_value_t = 52_428_800)]
         ingest_max_body: usize,
 
+        /// Hard cap on per-corpus adaptive overfetch for POST /similar.
+        /// Raise for large corpora with permissive thresholds. Default: 10000.
+        #[arg(long, default_value_t = 10_000)]
+        similar_overfetch_cap: usize,
+
         /// Default for query-time CWE hierarchy expansion. Per-request
         /// override via the `cwe_expand` query parameter.
         #[arg(long)]

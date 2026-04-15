@@ -709,6 +709,7 @@ async fn main() {
             batch_max_queries,
             tenant_field,
             ingest_max_body,
+            similar_overfetch_cap,
         } => {
             let token = token.or_else(|| std::env::var("FASTRAG_TOKEN").ok());
 
@@ -764,7 +765,7 @@ async fn main() {
                 batch_max_queries,
                 tenant_field,
                 ingest_max_body,
-                10_000,
+                similar_overfetch_cap,
             )
             .await
             {

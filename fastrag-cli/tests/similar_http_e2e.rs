@@ -128,7 +128,10 @@ async fn post_similar_rejects_hybrid_params() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     let body = resp.text().await.unwrap();
-    assert!(body.contains("/query"), "error should point to /query: {body}");
+    assert!(
+        body.contains("/query"),
+        "error should point to /query: {body}"
+    );
 }
 
 #[tokio::test]
@@ -314,10 +317,8 @@ async fn post_similar_fan_out_merges_across_corpora() {
     let body: serde_json::Value = resp.json().await.unwrap();
     let hits = body["hits"].as_array().unwrap();
     assert_eq!(hits.len(), 2);
-    let corpora: std::collections::BTreeSet<&str> = hits
-        .iter()
-        .map(|h| h["corpus"].as_str().unwrap())
-        .collect();
+    let corpora: std::collections::BTreeSet<&str> =
+        hits.iter().map(|h| h["corpus"].as_str().unwrap()).collect();
     assert!(corpora.contains("one"));
     assert!(corpora.contains("two"));
     assert!(body["stats"]["per_corpus"]["one"].is_object());
@@ -412,10 +413,10 @@ async fn post_similar_tenant_filter_applied() {
 #[tokio::test]
 async fn post_similar_truncated_flag() {
     // 20 matching docs, tiny overfetch cap -> truncated=true.
-    let docs: Vec<(String, String)> =
-        (0..20).map(|i| (format!("d{i}"), "alpha".to_string())).collect();
-    let docs_ref: Vec<(&str, &str)> =
-        docs.iter().map(|(i, b)| (i.as_str(), b.as_str())).collect();
+    let docs: Vec<(String, String)> = (0..20)
+        .map(|i| (format!("d{i}"), "alpha".to_string()))
+        .collect();
+    let docs_ref: Vec<(&str, &str)> = docs.iter().map(|(i, b)| (i.as_str(), b.as_str())).collect();
     let corpus = build_toy_corpus(&docs_ref);
 
     // Spawn with overfetch_cap = 5.
