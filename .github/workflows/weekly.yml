@@ -94,6 +94,8 @@ jobs:
             index tests/gold/corpus \
             --corpus eval-corpus/ctx \
             --embedder qwen3-q8 \
+            --metadata-fields published_date,last_modified \
+            --metadata-types published_date=date,last_modified=date \
             --contextualize
 
       - name: Build raw corpus
@@ -102,7 +104,9 @@ jobs:
             --features retrieval,rerank,contextual,contextual-llama -- \
             index tests/gold/corpus \
             --corpus eval-corpus/raw \
-            --embedder qwen3-q8
+            --embedder qwen3-q8 \
+            --metadata-fields published_date,last_modified \
+            --metadata-types published_date=date,last_modified=date
 
       - name: Save eval corpus cache
         uses: actions/cache/save@v4
