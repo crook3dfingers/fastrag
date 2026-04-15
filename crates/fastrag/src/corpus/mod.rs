@@ -18,6 +18,11 @@ pub mod incremental;
 pub mod registry;
 pub use registry::CorpusRegistry;
 pub mod hybrid;
+pub mod similar;
+pub use similar::{
+    PerCorpusStats, SimilarityHit, SimilarityRequest, SimilarityResponse, SimilarityStats,
+    similarity_search,
+};
 
 /// Options for the filter-aware query path.
 #[derive(Debug, Clone, Default)]
@@ -116,6 +121,8 @@ pub enum CorpusError {
     #[cfg(feature = "store")]
     #[error("store error: {0}")]
     Store(#[from] fastrag_store::error::StoreError),
+    #[error("{0}")]
+    Other(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
