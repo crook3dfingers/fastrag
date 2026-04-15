@@ -2020,8 +2020,7 @@ git commit -m "feat(cli): --similar-overfetch-cap flag for serve-http"
 - Modify: `README.md`
 - Modify: `CLAUDE.md`
 
-**Before editing either file, invoke the doc-editor skill** per `CLAUDE.md` project rules:
-run the doc-editor skill against the drafted section BEFORE writing it to the file, apply changes, then write.
+**Before editing either file, invoke the doc-editor skill** per `CLAUDE.md` project rules.
 
 - [ ] **Step 1: Draft the "Similarity Search" section for README.md**
 
