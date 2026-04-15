@@ -1,0 +1,3 @@
+{"a": "SQL injection in login", "b": "sql injection on the login page", "is_duplicate": true}
+{"a": "XSS in search", "b": "cross-site scripting vulnerability in the search form", "is_duplicate": true}
+{"a": "SQL injection in login", "b": "open redirect on logout", "is_duplicate": false}
