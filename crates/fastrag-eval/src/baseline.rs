@@ -179,6 +179,7 @@ mod tests {
                 mrr_at_10: primary_mrr,
                 latency: zero_pct,
                 per_question: vec![],
+                buckets: Default::default(),
             }],
             rerank_delta: 0.0,
             contextual_delta: 0.0,

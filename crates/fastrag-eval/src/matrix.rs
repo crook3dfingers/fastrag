@@ -110,6 +110,11 @@ pub struct VariantReport {
     pub mrr_at_10: f64,
     pub latency: LatencyPercentiles,
     pub per_question: Vec<QuestionResult>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub buckets: std::collections::BTreeMap<
+        String,
+        std::collections::BTreeMap<String, crate::buckets::BucketMetrics>,
+    >,
 }
 
 /// Top-level matrix evaluation report.
@@ -300,6 +305,7 @@ pub fn run_matrix<D: CorpusDriver>(
             0.0
         };
 
+        let buckets = crate::buckets::compute_buckets(&per_question, gold_set);
         variant_reports.push(VariantReport {
             variant: *variant,
             hit_at_1,
@@ -315,6 +321,7 @@ pub fn run_matrix<D: CorpusDriver>(
                 fuse: percentiles(&h_fuse),
             },
             per_question,
+            buckets,
         });
     }
 
