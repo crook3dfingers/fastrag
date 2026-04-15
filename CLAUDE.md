@@ -46,6 +46,10 @@ cargo test -p fastrag --test cwe_expansion --features retrieval                #
 cargo test -p fastrag-cli --test cwe_expand_e2e --features "retrieval,store"   # CLI --cwe-expand e2e
 cargo test -p fastrag-cli --test cwe_expand_http_e2e --features "retrieval,store"  # HTTP cwe_expand param e2e
 cargo test -p fastrag-cli --features retrieval --test similar_http_e2e  # POST /similar threshold endpoint e2e
+cargo test -p fastrag --features retrieval --test minhash_verify            # /similar + MinHash verifier integration test
+cargo test -p fastrag-cli --features retrieval --test similar_verify_http_e2e  # HTTP /similar verify block e2e
+cargo test -p fastrag --features retrieval --test dedup_synthetic_gate      # Synthetic dedup precision/recall gate
+FASTRAG_DEDUP_GOLD=1 cargo test -p fastrag --features retrieval --test dedup_vams_gold -- --ignored  # VAMS labeled pairs benchmark
 cargo test -p fastrag --features retrieval --test hybrid_retrieval    # Hybrid BM25 + dense RRF integration test
 cargo test -p fastrag --features retrieval --test temporal_decay      # Temporal decay integration test (Date-typed metadata)
 cargo test -p fastrag-cli --features retrieval --test hybrid_e2e      # CLI --hybrid e2e (jsonl ingest + query)

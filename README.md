@@ -397,6 +397,7 @@ Replace `corpus` with `corpora: ["acme-q1", "acme-q2"]` to fan out across multip
 | `corpora` | no | Non-empty array of registry names. Mutually exclusive with `corpus`. |
 | `filter` | no | String syntax (`"severity = HIGH"`) or JSON `FilterExpr`. |
 | `fields` | no | Projection (`include` or `exclude-` prefix), same syntax as `/query`. |
+| `verify` | no | Optional `{ method, threshold }` block. Runs a MinHash Jaccard filter over cosine-surviving candidates. `method` is `"minhash"` (only value in v1). `threshold` is `[0.0, 1.0]`. Out-of-range or unknown fields return 400. |
 
 Hybrid retrieval, temporal decay, CWE expansion, and reranking are rejected with 400 — they change score semantics, which breaks threshold portability.
 
@@ -412,6 +413,8 @@ Hybrid retrieval, temporal decay, CWE expansion, and reranking are rejected with
   "latency": { "embed_us": 1240, "hnsw_us": 8100, "total_us": 12300 }
 }
 ```
+
+When `verify` is set, each surviving hit carries `verify_score` (MinHash Jaccard estimate, `[0.0, 1.0]`) and `stats.dropped_by_verifier` counts how many candidates passed the cosine threshold but failed the Jaccard check. Both fields are omitted when `verify` is absent.
 
 `truncated: true` means the adaptive overfetch hit the server cap before exhausting the above-threshold tail. Raise `--similar-overfetch-cap` on `serve-http` when this occurs on large corpora.
 
@@ -465,6 +468,21 @@ Hybrid retrieval, temporal decay, CWE expansion, and reranking are rejected with
    The tenant header is AND-ed into any supplied `filter` before the threshold cut, scoping the fan-out to records the caller owns.
 
 Tune thresholds on a labelled sample of near-duplicates before promoting a policy — cosine distributions vary by corpus size, chunk length, and embedder.
+
+**Strict dedup with the MinHash verifier.** Cosine thresholds drift with embedding model changes and text-length distribution, causing false positives near the boundary. For strict dedup — collapsing scanner outputs where one false merge costs a missed finding — add a `verify` block:
+
+```json
+POST /similar
+{
+  "text": "SQL injection in /api/v1/login — sink: execute(user_input)",
+  "threshold": 0.85,
+  "max_results": 10,
+  "corpus": "vams-findings",
+  "verify": { "method": "minhash", "threshold": 0.7 }
+}
+```
+
+Cosine and Jaccard filter independently: the cosine threshold gates ANN candidates, the Jaccard threshold gates lexical near-duplicates. Hits carry `verify_score`; `stats.dropped_by_verifier` reports how many ANN survivors the Jaccard filter rejected.
 
 **Threshold portability caveat:** cosine thresholds are specific to an embedder model. A `0.85` threshold for `bge-small` is not comparable to a `0.85` threshold for `text-embedding-3-small`. Version thresholds per embedder.
 
@@ -654,7 +672,7 @@ The `serve-http` subcommand exposes a small operational surface for production u
 | `GET /health` | Liveness probe — returns `{"status":"ok"}` |
 | `GET /query?q=...&top_k=N` | Semantic corpus search |
 | `POST /batch-query` | Batched queries in one request; supports cross-corpus federation |
-| `POST /similar` | Raw-cosine threshold filtering for dedup and near-duplicate detection |
+| `POST /similar` | Raw-cosine threshold filtering for dedup; optional MinHash verifier for strict near-duplicate confirmation |
 | `POST /ingest` | Append JSONL records to a corpus |
 | `DELETE /ingest/:id` | Remove a record by its external id |
 | `GET /corpora` | List registered corpora (tenant-scoped when configured) |
