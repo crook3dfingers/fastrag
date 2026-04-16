@@ -1,6 +1,14 @@
 //! End-to-end: post-fusion multiplicative decay promotes fresh docs over
 //! equally-relevant stale docs, and a dateless prior of 0.5 lands the
 //! undated doc between them.
+//!
+//! # Ignored tests (Task 8 → Task 9)
+//!
+//! The following tests relied on pre-rerank decay inside `query_hybrid`.
+//! That branch was removed in Task 8; Task 9 restores equivalent coverage
+//! via late injection (post-rerank) through `apply_temporal_policy`.
+//!
+//! - `decay_promotes_fresh_over_equally_relevant_stale`
 #![cfg(feature = "store")]
 
 use std::collections::BTreeMap;
@@ -49,6 +57,7 @@ fn chunking() -> ChunkingStrategy {
 }
 
 #[test]
+#[ignore = "relies on pre-rerank decay — restored by late injection in Task 9"]
 fn decay_promotes_fresh_over_equally_relevant_stale() {
     let tmp = tempfile::tempdir().unwrap();
     let corpus = tmp.path().join("corpus");

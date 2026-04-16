@@ -645,24 +645,11 @@ pub fn query_hybrid(
     let mut fused = rrf_fuse(&[&bm25_sids, &dense_sids], opts.rrf_k);
     breakdown.fuse_us = t.elapsed().as_micros() as u64;
 
-    if let Some(temp) = &opts.temporal {
-        let ids: Vec<u64> = fused.iter().map(|s| s.id).collect();
-        let rows = store.fetch_metadata(&ids)?;
-        let row_map: std::collections::HashMap<
-            u64,
-            Vec<(String, fastrag_store::schema::TypedValue)>,
-        > = rows.into_iter().collect();
-        let dates: Vec<Option<NaiveDate>> = fused
-            .iter()
-            .map(|s| {
-                row_map
-                    .get(&s.id)
-                    .and_then(|f| extract_date_coalesce(f, &temp.date_fields))
-            })
-            .collect();
-        fused = apply_decay(&fused, &dates, temp);
-    }
-
+    // Temporal decay is applied post-rerank in
+    // `corpus/mod.rs::query_corpus_reranked_opts` (Task 9).
+    // `HybridOpts.temporal` is retained for now but is a no-op here —
+    // the reranker must see undecayed candidates.
+    let _ = &opts.temporal;
     fused.truncate(top_k);
     Ok(fused)
 }
@@ -745,12 +732,25 @@ mod query_hybrid_tests {
     }
 
     #[test]
-    fn temporal_option_runs_decay_branch() {
+    fn temporal_option_is_ignored_in_query_hybrid() {
+        // `HybridOpts.temporal` is a no-op inside `query_hybrid` since Task 8.
+        // Decay is applied post-rerank (Task 9). Running with and without a
+        // temporal option must return identical ids in identical order with
+        // identical scores.
         let (_dir, store) = fixture();
         let qvec = vec![1.0, 0.0, 0.0];
 
-        let mut bd = LatencyBreakdown::default();
-        let opts = HybridOpts {
+        let mut bd_none = LatencyBreakdown::default();
+        let opts_none = HybridOpts {
+            enabled: true,
+            rrf_k: 60,
+            overfetch_factor: 4,
+            temporal: None,
+        };
+        let out_none = query_hybrid(&store, "alpha", &qvec, 3, &opts_none, &mut bd_none).unwrap();
+
+        let mut bd_some = LatencyBreakdown::default();
+        let opts_some = HybridOpts {
             enabled: true,
             rrf_k: 60,
             overfetch_factor: 4,
@@ -763,7 +763,26 @@ mod query_hybrid_tests {
                 now: Utc::now(),
             }),
         };
-        let out = query_hybrid(&store, "alpha", &qvec, 3, &opts, &mut bd).unwrap();
-        assert!(!out.is_empty(), "decay branch returned empty");
+        let out_some = query_hybrid(&store, "alpha", &qvec, 3, &opts_some, &mut bd_some).unwrap();
+
+        assert_eq!(
+            out_none.len(),
+            out_some.len(),
+            "result lengths differ: none={:?} some={:?}",
+            out_none,
+            out_some
+        );
+        for (a, b) in out_none.iter().zip(out_some.iter()) {
+            assert_eq!(
+                a.id, b.id,
+                "ids differ at position — temporal must be no-op; none={:?} some={:?}",
+                out_none, out_some
+            );
+            assert_eq!(
+                a.score, b.score,
+                "scores differ — temporal must be no-op; none={:?} some={:?}",
+                out_none, out_some
+            );
+        }
     }
 }
