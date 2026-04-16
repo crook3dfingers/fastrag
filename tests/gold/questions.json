@@ -2253,6 +2253,286 @@
         "style": "mixed",
         "temporal_intent": "historical"
       }
+    },
+    {
+      "id": "q-new-rec-011",
+      "question": "What 2025 Ivanti Connect Secure CVE involved a stack overflow exploited by UNC5221?",
+      "must_contain_cve_ids": ["CVE-2025-0282"],
+      "must_contain_terms": ["UNC5221", "TRAILBLAZE"],
+      "notes": "new-2026: recency, targets 51-ivanti-cs-rce-2025",
+      "axes": { "style": "identifier", "temporal_intent": "recency_seeking" }
+    },
+    {
+      "id": "q-new-rec-012",
+      "question": "What is the latest Ivanti Connect Secure pre-auth RCE deploying the BRUSHFIRE backdoor?",
+      "must_contain_cve_ids": ["CVE-2025-0282"],
+      "must_contain_terms": ["BRUSHFIRE", "Ivanti Connect Secure"],
+      "notes": "new-2026: recency, targets 51-ivanti-cs-rce-2025",
+      "axes": { "style": "conceptual", "temporal_intent": "recency_seeking" }
+    },
+    {
+      "id": "q-new-rec-013",
+      "question": "Which 2025 Ivanti CVE involves the SPAWNCHIMERA malware family and a chained exploit via X-Forwarded-For overflow?",
+      "must_contain_cve_ids": ["CVE-2025-22457"],
+      "must_contain_terms": ["SPAWNCHIMERA", "CVE-2025-22457"],
+      "notes": "new-2026: recency, targets 52-ivanti-cs-rce-apr2025",
+      "axes": { "style": "identifier", "temporal_intent": "recency_seeking" }
+    },
+    {
+      "id": "q-new-rec-014",
+      "question": "What is the current Ivanti Connect Secure April 2025 RCE affecting 22.7R2.5 and earlier?",
+      "must_contain_cve_ids": ["CVE-2025-22457"],
+      "must_contain_terms": ["22.7R2.6", "SPAWNCHIMERA"],
+      "notes": "new-2026: recency, targets 52-ivanti-cs-rce-apr2025",
+      "axes": { "style": "conceptual", "temporal_intent": "recency_seeking" }
+    },
+    {
+      "id": "q-new-rec-015",
+      "question": "Which 2025 Windows CLFS zero-day was used by Storm-2460 to deploy Play ransomware?",
+      "must_contain_cve_ids": ["CVE-2025-29824"],
+      "must_contain_terms": ["Storm-2460", "clfs.sys"],
+      "notes": "new-2026: recency, targets 53-windows-clfs-eop-2025",
+      "axes": { "style": "identifier", "temporal_intent": "recency_seeking" }
+    },
+    {
+      "id": "q-new-rec-016",
+      "question": "What is the current guidance for the Windows CLFS use-after-free EoP delivered via PipeMagic in 2025?",
+      "must_contain_cve_ids": ["CVE-2025-29824"],
+      "must_contain_terms": ["PipeMagic", "Grixba"],
+      "notes": "new-2026: recency, targets 53-windows-clfs-eop-2025",
+      "axes": { "style": "conceptual", "temporal_intent": "recency_seeking" }
+    },
+    {
+      "id": "q-new-rec-017",
+      "question": "Which 2025 Apache Tomcat CVE exploits partial PUT with Content-Range to trigger FileStore deserialization?",
+      "must_contain_cve_ids": ["CVE-2025-24813"],
+      "must_contain_terms": ["Content-Range", "FileStore"],
+      "notes": "new-2026: recency, targets 54-tomcat-partial-put-rce",
+      "axes": { "style": "identifier", "temporal_intent": "recency_seeking" }
+    },
+    {
+      "id": "q-new-rec-018",
+      "question": "What is the latest Apache Tomcat RCE involving partial PUT and session file deserialization, disclosed in 2025?",
+      "must_contain_cve_ids": ["CVE-2025-24813"],
+      "must_contain_terms": ["partial PUT", "FileStore"],
+      "notes": "new-2026: recency, targets 54-tomcat-partial-put-rce",
+      "axes": { "style": "conceptual", "temporal_intent": "recency_seeking" }
+    },
+    {
+      "id": "q-new-rec-019",
+      "question": "Which 2025 CVE gives Apache Parquet Java a CVSS 10 score due to Avro schema deserialization?",
+      "must_contain_cve_ids": ["CVE-2025-30065"],
+      "must_contain_terms": ["parquet-avro", "Avro schema"],
+      "notes": "new-2026: recency, targets 55-apache-parquet-rce",
+      "axes": { "style": "identifier", "temporal_intent": "recency_seeking" }
+    },
+    {
+      "id": "q-new-rec-020",
+      "question": "What is the current risk for Apache Parquet data pipelines from the 2025 reflective class instantiation flaw?",
+      "must_contain_cve_ids": ["CVE-2025-30065"],
+      "must_contain_terms": ["parquet-avro", "1.15.1"],
+      "notes": "new-2026: recency, targets 55-apache-parquet-rce",
+      "axes": { "style": "conceptual", "temporal_intent": "recency_seeking" }
+    },
+    {
+      "id": "q-new-rec-021",
+      "question": "Which 2025 CVE in Erlang/OTP SSH allows pre-auth RCE via SSH_MSG_CHANNEL_OPEN before authentication?",
+      "must_contain_cve_ids": ["CVE-2025-32433"],
+      "must_contain_terms": ["GHSA-37cp-fgq5-7wc2", "Erlang/OTP"],
+      "notes": "new-2026: recency, targets 56-erlang-otp-ssh-rce",
+      "axes": { "style": "identifier", "temporal_intent": "recency_seeking" }
+    },
+    {
+      "id": "q-new-rec-022",
+      "question": "What is the latest critical pre-auth RCE affecting RabbitMQ and Ejabberd via their embedded Erlang SSH daemon in 2025?",
+      "must_contain_cve_ids": ["CVE-2025-32433"],
+      "must_contain_terms": ["RabbitMQ", "Ejabberd"],
+      "notes": "new-2026: recency, targets 56-erlang-otp-ssh-rce",
+      "axes": { "style": "conceptual", "temporal_intent": "recency_seeking" }
+    },
+    {
+      "id": "q-new-rec-023",
+      "question": "Which 2025 Windows CVE is a heap overflow in afd.sys exploited as a zero-day before February Patch Tuesday?",
+      "must_contain_cve_ids": ["CVE-2025-21418"],
+      "must_contain_terms": ["afd.sys", "CVE-2025-21418"],
+      "notes": "new-2026: recency, targets 57-windows-winsock-eop-2025",
+      "axes": { "style": "identifier", "temporal_intent": "recency_seeking" }
+    },
+    {
+      "id": "q-new-rec-024",
+      "question": "What is the current Windows WinSock Ancillary Function Driver privilege escalation from early 2025?",
+      "must_contain_cve_ids": ["CVE-2025-21418"],
+      "must_contain_terms": ["afd.sys", "DeviceIoControl"],
+      "notes": "new-2026: recency, targets 57-windows-winsock-eop-2025",
+      "axes": { "style": "conceptual", "temporal_intent": "recency_seeking" }
+    },
+    {
+      "id": "q-new-rec-025",
+      "question": "Which 2025 CVE in PAN-OS allows authentication bypass via Nginx proxy misrouting to PHP scripts?",
+      "must_contain_cve_ids": ["CVE-2025-0108"],
+      "must_contain_terms": ["proxy misrouting", "Assetnote"],
+      "notes": "new-2026: recency, targets 58-paloalto-panos-auth-bypass",
+      "axes": { "style": "identifier", "temporal_intent": "recency_seeking" }
+    },
+    {
+      "id": "q-new-rec-026",
+      "question": "What is the latest Palo Alto PAN-OS management interface auth bypass, recently added to CISA KEV in 2025?",
+      "must_contain_cve_ids": ["CVE-2025-0108"],
+      "must_contain_terms": ["Nginx", "Assetnote"],
+      "notes": "new-2026: recency, targets 58-paloalto-panos-auth-bypass",
+      "axes": { "style": "conceptual", "temporal_intent": "recency_seeking" }
+    },
+    {
+      "id": "q-new-rec-027",
+      "question": "Which 2026 Fortinet CVE enables SSO authentication bypass via forged SAML assertion across FortiCloud tenants?",
+      "must_contain_cve_ids": ["CVE-2026-24858"],
+      "must_contain_terms": ["FortiCloud SSO", "cloud-noc@mail.io"],
+      "notes": "new-2026: recency, targets 59-fortinet-fortios-sso-bypass",
+      "axes": { "style": "identifier", "temporal_intent": "recency_seeking" }
+    },
+    {
+      "id": "q-new-rec-028",
+      "question": "What is the current FortiOS zero-day exploited in 2026 that creates rogue local admin accounts on FortiGate firewalls?",
+      "must_contain_cve_ids": ["CVE-2026-24858"],
+      "must_contain_terms": ["FortiCloud SSO", "cloud-init@mail.io"],
+      "notes": "new-2026: recency, targets 59-fortinet-fortios-sso-bypass",
+      "axes": { "style": "conceptual", "temporal_intent": "recency_seeking" }
+    },
+    {
+      "id": "q-new-rec-029",
+      "question": "Which 2026 Fortinet CVE is a CWE-288 authentication bypass in the FortiCloud SSO login path?",
+      "must_contain_cve_ids": ["CVE-2026-24858"],
+      "must_contain_terms": ["CWE-288", "FortiCloud SSO"],
+      "notes": "new-2026: recency, targets 59-fortinet-fortios-sso-bypass",
+      "axes": { "style": "identifier", "temporal_intent": "recency_seeking" }
+    },
+    {
+      "id": "q-new-rec-030",
+      "question": "Which 2025 Zimbra CVE allows unauthenticated LFI via the RestFilter servlet in Webmail Classic UI?",
+      "must_contain_cve_ids": ["CVE-2025-68645"],
+      "must_contain_terms": ["RestFilter", "/h/rest"],
+      "notes": "new-2026: recency, targets 60-zimbra-lfi-2025",
+      "axes": { "style": "identifier", "temporal_intent": "recency_seeking" }
+    },
+    {
+      "id": "q-new-rec-031",
+      "question": "What is the latest Zimbra Collaboration Suite local file inclusion advisory from late 2025?",
+      "must_contain_cve_ids": ["CVE-2025-68645"],
+      "must_contain_terms": ["RestFilter", "10.1.13"],
+      "notes": "new-2026: recency, targets 60-zimbra-lfi-2025",
+      "axes": { "style": "conceptual", "temporal_intent": "recency_seeking" }
+    },
+    {
+      "id": "q-new-rec-032",
+      "question": "Which 2025 CVE in Erlang/OTP SSH was assigned GHSA-37cp-fgq5-7wc2 and patches OTP-27.3.3?",
+      "must_contain_cve_ids": ["CVE-2025-32433"],
+      "must_contain_terms": ["OTP-27.3.3", "GHSA-37cp-fgq5-7wc2"],
+      "notes": "new-2026: recency, targets 56-erlang-otp-ssh-rce",
+      "axes": { "style": "identifier", "temporal_intent": "recency_seeking" }
+    },
+    {
+      "id": "q-new-rec-033",
+      "question": "What is the recently disclosed 2025 Windows CLFS zero-day leveraged by the Balloonfly threat group?",
+      "must_contain_cve_ids": ["CVE-2025-29824"],
+      "must_contain_terms": ["Balloonfly", "Play ransomware"],
+      "notes": "new-2026: recency, targets 53-windows-clfs-eop-2025",
+      "axes": { "style": "conceptual", "temporal_intent": "recency_seeking" }
+    },
+    {
+      "id": "q-new-rec-034",
+      "question": "Which 2025 Tomcat path equivalence CVE was first exploited in Poland one day before PoC publication?",
+      "must_contain_cve_ids": ["CVE-2025-24813"],
+      "must_contain_terms": ["Content-Range", "CWE-706"],
+      "notes": "new-2026: recency, targets 54-tomcat-partial-put-rce",
+      "axes": { "style": "identifier", "temporal_intent": "recency_seeking" }
+    },
+    {
+      "id": "q-new-rec-035",
+      "question": "What is the newest PAN-OS auth bypass that chains with CVE-2025-0111 for a root-level attack on the firewall?",
+      "must_contain_cve_ids": ["CVE-2025-0108"],
+      "must_contain_terms": ["CVE-2025-0111", "Nginx"],
+      "notes": "new-2026: recency, targets 58-paloalto-panos-auth-bypass",
+      "axes": { "style": "conceptual", "temporal_intent": "recency_seeking" }
+    },
+    {
+      "id": "q-new-hist-011",
+      "question": "As of 2006, what CWE describes the risk of deserializing untrusted data via gadget chains?",
+      "must_contain_cve_ids": [],
+      "must_contain_terms": ["CWE-502", "gadget chain"],
+      "notes": "new-2026: historical, targets 04-cwe-502-deserialize",
+      "axes": { "style": "conceptual", "temporal_intent": "historical" }
+    },
+    {
+      "id": "q-new-hist-012",
+      "question": "In 2014, what OpenSSL heartbeat extension flaw allowed reading 64 KB of server memory per request?",
+      "must_contain_cve_ids": ["CVE-2014-0160"],
+      "must_contain_terms": ["Heartbleed", "memcpy"],
+      "notes": "new-2026: historical, targets 07-heartbleed",
+      "axes": { "style": "conceptual", "temporal_intent": "historical" }
+    },
+    {
+      "id": "q-new-hist-013",
+      "question": "Which 2014 Bash vulnerability enabled RCE via CGI scripts by injecting commands into environment variables?",
+      "must_contain_cve_ids": ["CVE-2014-6271"],
+      "must_contain_terms": ["Shellshock", "CGI"],
+      "notes": "new-2026: historical, targets 08-shellshock",
+      "axes": { "style": "identifier", "temporal_intent": "historical" }
+    },
+    {
+      "id": "q-new-hist-014",
+      "question": "The 2017 NSA-linked SMBv1 exploit that drove WannaCry across 150 countries.",
+      "must_contain_cve_ids": ["CVE-2017-0144"],
+      "must_contain_terms": ["EternalBlue", "DoublePulsar"],
+      "notes": "new-2026: historical, targets 09-eternalblue",
+      "axes": { "style": "mixed", "temporal_intent": "historical" }
+    },
+    {
+      "id": "q-new-hist-015",
+      "question": "Which 2017 Apache Struts CVE exploited OGNL injection via the Jakarta multipart Content-Type header, enabling the Equifax breach?",
+      "must_contain_cve_ids": ["CVE-2017-5638"],
+      "must_contain_terms": ["JakartaMultiPartRequest", "Equifax"],
+      "notes": "new-2026: historical, targets 10-struts-ognl",
+      "axes": { "style": "identifier", "temporal_intent": "historical" }
+    },
+    {
+      "id": "q-new-hist-016",
+      "question": "The 2020 Windows CryptoAPI ECC certificate spoofing flaw disclosed by the NSA.",
+      "must_contain_cve_ids": ["CVE-2020-0601"],
+      "must_contain_terms": ["CurveBall", "Crypt32.dll"],
+      "notes": "new-2026: historical, targets 12-curveball",
+      "axes": { "style": "mixed", "temporal_intent": "historical" }
+    },
+    {
+      "id": "q-new-hist-017",
+      "question": "In 2020, which Netlogon vulnerability used AES-CFB8 with a zero IV to reset domain controller passwords?",
+      "must_contain_cve_ids": ["CVE-2020-1472"],
+      "must_contain_terms": ["Zerologon", "AES-CFB8"],
+      "notes": "new-2026: historical, targets 13-zerologon",
+      "axes": { "style": "identifier", "temporal_intent": "historical" }
+    },
+    {
+      "id": "q-new-hist-018",
+      "question": "As of 2017, what technique did EternalBlue use to achieve kernel-mode code execution on Windows?",
+      "must_contain_cve_ids": ["CVE-2017-0144"],
+      "must_contain_terms": ["Transaction2", "srv.sys"],
+      "notes": "new-2026: historical, targets 09-eternalblue",
+      "axes": { "style": "conceptual", "temporal_intent": "historical" }
+    },
+    {
+      "id": "q-new-hist-019",
+      "question": "The 2020 Zerologon exploit that requires only ~256 authentication attempts to compromise a domain controller.",
+      "must_contain_cve_ids": ["CVE-2020-1472"],
+      "must_contain_terms": ["Zerologon", "NetrServerPasswordSet2"],
+      "notes": "new-2026: historical, targets 13-zerologon",
+      "axes": { "style": "mixed", "temporal_intent": "historical" }
+    },
+    {
+      "id": "q-new-hist-020",
+      "question": "As of 2014, how did Shellshock enable pre-auth RCE via the wopbot worm and Apache CGI?",
+      "must_contain_cve_ids": ["CVE-2014-6271"],
+      "must_contain_terms": ["wopbot", "Shellshock"],
+      "notes": "new-2026: historical, targets 08-shellshock",
+      "axes": { "style": "conceptual", "temporal_intent": "historical" }
     }
   ]
 }
