@@ -31,6 +31,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 metrics = "0.24"
 metrics-exporter-prometheus = { version = "0.16", default-features = false }
 subtle = "2"
+arc-swap = "1.7"
 dirs.workspace = true
 humantime = { workspace = true }
 chrono.workspace = true
@@ -80,3 +81,4 @@ reqwest.workspace = true
 wiremock = "0.6"
 fastrag-embed = { workspace = true, features = ["test-utils"] }
 prometheus-parse = "0.2"
+axum-test = "16"

@@ -788,8 +788,39 @@ async fn main() {
             tenant_field,
             ingest_max_body,
             similar_overfetch_cap,
+            bundle_path,
+            bundles_dir,
+            admin_token,
+            bundle_retention,
         } => {
             let token = token.or_else(|| std::env::var("FASTRAG_TOKEN").ok());
+            let admin_token = admin_token.or_else(|| std::env::var("FASTRAG_ADMIN_TOKEN").ok());
+
+            let _ = bundle_retention;
+
+            // Load bundle BEFORE touching corpus/embedder so an invalid bundle
+            // fails the server fast without spending time on embedder init.
+            let bundle_state = match bundle_path.as_deref() {
+                Some(path) => match fastrag::bundle::BundleState::load(path) {
+                    Ok(state) => Some(std::sync::Arc::new(arc_swap::ArcSwap::from_pointee(state))),
+                    Err(e) => {
+                        eprintln!("Error loading bundle at {}: {e}", path.display());
+                        std::process::exit(1);
+                    }
+                },
+                None => None,
+            };
+
+            if admin_token.is_some() && token.as_ref() == admin_token.as_ref() {
+                eprintln!("Error: --admin-token must differ from --token");
+                std::process::exit(1);
+            }
+
+            let bundle_cfg = fastrag_cli::http::HttpBundleConfig {
+                state: bundle_state,
+                bundles_dir,
+                admin_token,
+            };
 
             // Build registry from repeatable --corpus name=path args.
             let registry = fastrag::corpus::CorpusRegistry::new();
@@ -832,7 +863,7 @@ async fn main() {
                 rerank_cfg.over_fetch = rerank_over_fetch;
             }
 
-            if let Err(e) = fastrag_cli::http::serve_http_with_registry_port(
+            if let Err(e) = fastrag_cli::http::serve_http_with_registry_port_bundle(
                 registry,
                 port,
                 embedder,
@@ -844,6 +875,7 @@ async fn main() {
                 tenant_field,
                 ingest_max_body,
                 similar_overfetch_cap,
+                bundle_cfg,
             )
             .await
             {

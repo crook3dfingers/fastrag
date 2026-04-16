@@ -8,3 +8,6 @@ pub mod embed_loader;
 pub mod http;
 #[cfg(feature = "rerank")]
 pub mod rerank_loader;
+
+#[cfg(feature = "retrieval")]
+pub mod test_support;

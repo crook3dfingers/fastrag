@@ -687,6 +687,26 @@ pub enum Command {
         /// override via the `cwe_expand` query parameter.
         #[arg(long)]
         cwe_expand: bool,
+
+        /// Path to a fastrag bundle directory. When set, the server loads
+        /// the bundle at startup and enables `/cve`, `/cwe`, `/cwe/relation`,
+        /// `/ready`, and `/admin/reload`.
+        #[arg(long)]
+        bundle_path: Option<PathBuf>,
+
+        /// Root directory for bundles. Names passed to `/admin/reload`
+        /// resolve under here (e.g. `bundles_dir/fastrag-20260416/`).
+        #[arg(long)]
+        bundles_dir: Option<PathBuf>,
+
+        /// Admin token for `/admin/*` endpoints. Also read from
+        /// `FASTRAG_ADMIN_TOKEN`. Must differ from `--token`.
+        #[arg(long)]
+        admin_token: Option<String>,
+
+        /// Number of prior bundles to retain on disk for rollback.
+        #[arg(long, default_value_t = 3)]
+        bundle_retention: usize,
     },
 
     /// Delete a record by external ID from a store-backed corpus

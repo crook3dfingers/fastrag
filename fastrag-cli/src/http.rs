@@ -2,12 +2,14 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
+use arc_swap::ArcSwap;
 use axum::extract::{DefaultBodyLimit, Extension, Query, Request, State};
 use axum::http::StatusCode;
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
+use fastrag::bundle::BundleState;
 use fastrag::corpus::{CorpusError, SearchHitDto};
 use fastrag::default_separators;
 use fastrag::{DynEmbedder, DynEmbedderTrait, ops};
@@ -45,6 +47,21 @@ struct AppState {
     reranker: Option<std::sync::Arc<dyn fastrag_rerank::Reranker>>,
     #[cfg(feature = "rerank")]
     rerank_over_fetch: usize,
+
+    /// Bundle-mode state. `None` means the server was started with only
+    /// `--corpus`; bundle-only routes (`/cve`, `/cwe`, `/cwe/relation`,
+    /// `/ready`, `/admin/reload`) return 503 in that mode.
+    #[allow(dead_code)] // consumed by Task 4+ handlers
+    bundle: Option<Arc<ArcSwap<BundleState>>>,
+    /// Root dir for bundles. Names passed to `/admin/reload` resolve here.
+    #[allow(dead_code)] // consumed by Task 6 (/admin/reload)
+    bundles_dir: Option<PathBuf>,
+    /// Separate admin credential. `/admin/*` require this; read-path
+    /// `--token` never grants admin.
+    admin_token: Option<Arc<String>>,
+    /// Serializes concurrent `/admin/reload` calls.
+    #[allow(dead_code)] // consumed by Task 6 (/admin/reload)
+    reload_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 /// Shared-secret auth state. `None` = auth disabled (the server logs a warning
@@ -513,6 +530,17 @@ impl Default for HttpRerankerConfig {
     }
 }
 
+/// Optional bundle-mode configuration for the HTTP server. When `state` is
+/// `Some`, `/cve`, `/cwe`, `/cwe/relation`, `/ready`, and `/admin/reload`
+/// become live. Leaving it `None` preserves the legacy `--corpus`-only
+/// surface.
+#[derive(Clone, Default)]
+pub struct HttpBundleConfig {
+    pub state: Option<Arc<ArcSwap<BundleState>>>,
+    pub bundles_dir: Option<PathBuf>,
+    pub admin_token: Option<String>,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn serve_http(
     corpus_dir: PathBuf,
@@ -581,8 +609,40 @@ pub async fn serve_http_with_registry_port(
     ingest_max_body: usize,
     similar_overfetch_cap: usize,
 ) -> Result<(), HttpError> {
+    serve_http_with_registry_port_bundle(
+        registry,
+        port,
+        embedder,
+        token,
+        dense_only,
+        cwe_expand_default,
+        rerank_cfg,
+        batch_max_queries,
+        tenant_field,
+        ingest_max_body,
+        similar_overfetch_cap,
+        HttpBundleConfig::default(),
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn serve_http_with_registry_port_bundle(
+    registry: fastrag::corpus::CorpusRegistry,
+    port: u16,
+    embedder: DynEmbedder,
+    token: Option<String>,
+    dense_only: bool,
+    cwe_expand_default: bool,
+    rerank_cfg: HttpRerankerConfig,
+    batch_max_queries: usize,
+    tenant_field: Option<String>,
+    ingest_max_body: usize,
+    similar_overfetch_cap: usize,
+    bundle_cfg: HttpBundleConfig,
+) -> Result<(), HttpError> {
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
-    serve_http_with_registry(
+    serve_http_with_registry_and_bundle(
         registry,
         listener,
         embedder,
@@ -594,6 +654,7 @@ pub async fn serve_http_with_registry_port(
         tenant_field,
         ingest_max_body,
         similar_overfetch_cap,
+        bundle_cfg,
     )
     .await
 }
@@ -611,6 +672,38 @@ pub async fn serve_http_with_registry(
     tenant_field: Option<String>,
     ingest_max_body: usize,
     similar_overfetch_cap: usize,
+) -> Result<(), HttpError> {
+    serve_http_with_registry_and_bundle(
+        registry,
+        listener,
+        embedder,
+        token,
+        dense_only,
+        cwe_expand_default,
+        rerank_cfg,
+        batch_max_queries,
+        tenant_field,
+        ingest_max_body,
+        similar_overfetch_cap,
+        HttpBundleConfig::default(),
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn serve_http_with_registry_and_bundle(
+    registry: fastrag::corpus::CorpusRegistry,
+    listener: tokio::net::TcpListener,
+    embedder: DynEmbedder,
+    token: Option<String>,
+    dense_only: bool,
+    cwe_expand_default: bool,
+    rerank_cfg: HttpRerankerConfig,
+    batch_max_queries: usize,
+    tenant_field: Option<String>,
+    ingest_max_body: usize,
+    similar_overfetch_cap: usize,
+    bundle_cfg: HttpBundleConfig,
 ) -> Result<(), HttpError> {
     // The `metrics` crate allows exactly one global recorder per process, but in
     // test binaries multiple serve_http_with_embedder calls share one process.
@@ -673,8 +766,21 @@ pub async fn serve_http_with_registry(
         reranker: rerank_cfg.reranker,
         #[cfg(feature = "rerank")]
         rerank_over_fetch: rerank_cfg.over_fetch,
+        bundle: bundle_cfg.state,
+        bundles_dir: bundle_cfg.bundles_dir,
+        admin_token: bundle_cfg.admin_token.map(Arc::new),
+        reload_lock: Arc::new(tokio::sync::Mutex::new(())),
     };
 
+    let app = build_router(app_state, auth_state);
+
+    axum::serve(listener, app)
+        .await
+        .map_err(|e| HttpError::Server(e.to_string()))?;
+    Ok(())
+}
+
+fn build_router(app_state: AppState, auth_state: AuthState) -> Router {
     let max_body = app_state.ingest_max_body;
 
     // /health stays unauthenticated for liveness probes.
@@ -708,15 +814,110 @@ pub async fn serve_http_with_registry(
             auth_middleware,
         ));
 
-    let app = Router::new()
+    // /admin/* is gated by a SEPARATE token (never by --token). If no admin
+    // token is configured, every call returns 401. Real handlers land in
+    // Task 6; the stub returns 501 so a live admin_token proves the auth
+    // gate passed.
+    let admin = Router::new()
+        .route(
+            "/admin/reload",
+            axum::routing::post(admin_reload_stub_handler),
+        )
+        .route_layer(middleware::from_fn_with_state(
+            app_state.clone(),
+            admin_auth_middleware,
+        ));
+
+    Router::new()
         .route("/health", get(health))
         .merge(protected)
-        .with_state(app_state);
+        .merge(admin)
+        .with_state(app_state)
+}
 
-    axum::serve(listener, app)
-        .await
-        .map_err(|e| HttpError::Server(e.to_string()))?;
-    Ok(())
+/// Test-only builder: assemble an `AppState` + router from a loaded bundle
+/// and a caller-supplied embedder. Integration tests pass a `MockEmbedder`
+/// via their own dev-dependency so the lib crate doesn't need
+/// `fastrag-embed/test-utils` enabled in its regular feature set.
+pub struct TestAppState(AppState);
+
+impl TestAppState {
+    pub fn from_bundle(
+        bundle_path: &std::path::Path,
+        admin_token: Option<String>,
+        embedder: DynEmbedder,
+    ) -> Result<Self, fastrag::bundle::BundleError> {
+        let state = fastrag::bundle::BundleState::load(bundle_path)?;
+        let bundle = Some(Arc::new(ArcSwap::from_pointee(state)));
+        let bundles_dir = bundle_path.parent().map(|p| p.to_path_buf());
+        let registry = fastrag::corpus::CorpusRegistry::new();
+
+        static TEST_METRICS: std::sync::OnceLock<PrometheusHandle> = std::sync::OnceLock::new();
+        let metrics = TEST_METRICS
+            .get_or_init(|| {
+                PrometheusBuilder::new()
+                    .install_recorder()
+                    .unwrap_or_else(|_| PrometheusBuilder::new().build_recorder().handle())
+            })
+            .clone();
+
+        Ok(Self(AppState {
+            registry,
+            embedder,
+            metrics,
+            dense_only: false,
+            cwe_expand_default: false,
+            batch_max_queries: 100,
+            tenant_field: None,
+            ingest_locks: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            ingest_max_body: 52_428_800,
+            similar_overfetch_cap: 10_000,
+            #[cfg(feature = "rerank")]
+            reranker: None,
+            #[cfg(feature = "rerank")]
+            rerank_over_fetch: 10,
+            bundle,
+            bundles_dir,
+            admin_token: admin_token.map(Arc::new),
+            reload_lock: Arc::new(tokio::sync::Mutex::new(())),
+        }))
+    }
+}
+
+pub fn build_router_for_test(app_state_internal: TestAppState) -> Router {
+    let auth_state = AuthState { token: None };
+    build_router(app_state_internal.0, auth_state)
+}
+
+async fn admin_auth_middleware(
+    State(state): State<AppState>,
+    req: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    let Some(expected) = state.admin_token.as_deref() else {
+        return Err(StatusCode::UNAUTHORIZED);
+    };
+    let provided = req
+        .headers()
+        .get("x-fastrag-admin-token")
+        .and_then(|v| v.to_str().ok());
+    let provided = match provided {
+        Some(p) => p,
+        None => return Err(StatusCode::UNAUTHORIZED),
+    };
+    if expected.as_bytes().ct_eq(provided.as_bytes()).into() {
+        Ok(next.run(req).await)
+    } else {
+        Err(StatusCode::UNAUTHORIZED)
+    }
+}
+
+async fn admin_reload_stub_handler() -> (StatusCode, Json<serde_json::Value>) {
+    // Real implementation lands in Task 6.
+    (
+        StatusCode::NOT_IMPLEMENTED,
+        Json(json!({"error": "not_implemented"})),
+    )
 }
 
 #[derive(Debug, Deserialize)]
