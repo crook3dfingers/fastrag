@@ -186,3 +186,19 @@ fn run_matrix_with_variant_filter_runs_only_selected() {
     assert_eq!(report.runs[0].variant, ConfigVariant::Primary);
     assert_eq!(report.runs[1].variant, ConfigVariant::NoRerank);
 }
+
+#[test]
+fn run_matrix_truncated_gold_set_limits_per_question() {
+    let mut gs = multi_entry_gold_set();
+    assert_eq!(gs.entries.len(), 3);
+    gs.entries.truncate(2);
+    let report = run_matrix(&StubDriver, &gs, 5, None).expect("run_matrix should succeed");
+    for variant_report in &report.runs {
+        assert_eq!(
+            variant_report.per_question.len(),
+            2,
+            "{:?}: expected 2 per_question entries after truncation",
+            variant_report.variant
+        );
+    }
+}

@@ -22,13 +22,17 @@ pub fn run_config_matrix(
     top_k: usize,
     baseline_path: Option<PathBuf>,
     variants: Option<String>,
+    max_queries: Option<usize>,
 ) -> Result<(), EvalError> {
     let gs_path = gold_set_path.ok_or(EvalError::MatrixRequiresGoldSet)?;
     let ctx_corpus = corpus
         .ok_or_else(|| EvalError::GoldSetInvalid("--config-matrix requires --corpus".into()))?;
     let raw_corpus = corpus_no_contextual.ok_or(EvalError::MatrixMissingRawCorpus)?;
 
-    let gs = gold_set::load(&gs_path)?;
+    let mut gs = gold_set::load(&gs_path)?;
+    if let Some(n) = max_queries {
+        gs.entries.truncate(n);
+    }
 
     // Auto-detect embedder from corpus manifest.
     let opts = EmbedderOptions {

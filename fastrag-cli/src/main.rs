@@ -696,6 +696,7 @@ async fn main() {
                     top_k,
                     baseline,
                     variants,
+                    max_queries,
                 ) {
                     eprintln!("Error running eval matrix: {e}");
                     std::process::exit(1);
