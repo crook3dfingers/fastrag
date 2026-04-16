@@ -20,6 +20,13 @@ use subtle::ConstantTimeEq;
 use thiserror::Error;
 use tracing::{info, info_span, warn};
 
+/// Resolve the bind address for the HTTP listener. Defaults to 127.0.0.1 so
+/// dev runs don't expose the server on the network. Set `FASTRAG_HOST=0.0.0.0`
+/// (or another interface) for container and server deployments.
+fn bind_host() -> String {
+    std::env::var("FASTRAG_HOST").unwrap_or_else(|_| "127.0.0.1".to_string())
+}
+
 /// Per-corpus read-write locks. Ingest/delete acquire write; queries acquire read.
 type IngestLocks =
     Arc<std::sync::Mutex<std::collections::HashMap<String, Arc<tokio::sync::RwLock<()>>>>>;
@@ -555,7 +562,8 @@ pub async fn serve_http(
     batch_max_queries: usize,
     ingest_max_body: usize,
 ) -> Result<(), HttpError> {
-    let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
+    let host = bind_host();
+    let listener = tokio::net::TcpListener::bind((host.as_str(), port)).await?;
     serve_http_with_embedder(
         corpus_dir,
         listener,
@@ -644,7 +652,8 @@ pub async fn serve_http_with_registry_port_bundle(
     similar_overfetch_cap: usize,
     bundle_cfg: HttpBundleConfig,
 ) -> Result<(), HttpError> {
-    let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
+    let host = bind_host();
+    let listener = tokio::net::TcpListener::bind((host.as_str(), port)).await?;
     serve_http_with_registry_and_bundle(
         registry,
         listener,
@@ -2383,5 +2392,38 @@ async fn similar_handler(
             warn!(error = %e, "similar failed");
             Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response())
         }
+    }
+}
+
+#[cfg(test)]
+mod bind_host_tests {
+    use super::bind_host;
+
+    // SAFETY: these tests touch the process environment. Serialize via a mutex
+    // so parallel cargo test runs in the same process don't race.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn defaults_to_loopback_when_unset() {
+        let _g = ENV_LOCK.lock().unwrap();
+        // SAFETY: single-threaded test section guarded by ENV_LOCK.
+        unsafe {
+            std::env::remove_var("FASTRAG_HOST");
+        }
+        assert_eq!(bind_host(), "127.0.0.1");
+    }
+
+    #[test]
+    fn honors_fastrag_host_override() {
+        let _g = ENV_LOCK.lock().unwrap();
+        // SAFETY: single-threaded test section guarded by ENV_LOCK.
+        unsafe {
+            std::env::set_var("FASTRAG_HOST", "0.0.0.0");
+        }
+        let got = bind_host();
+        unsafe {
+            std::env::remove_var("FASTRAG_HOST");
+        }
+        assert_eq!(got, "0.0.0.0");
     }
 }

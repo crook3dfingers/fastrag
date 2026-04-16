@@ -1,0 +1,109 @@
+# syntax=docker/dockerfile:1.6
+#
+# FastRAG airgap image.
+#
+# Stages:
+#   1. rust-builder  — compiles the fastrag binary with retrieval + rerank-llama
+#                      features. Also captures the libonnxruntime shared lib
+#                      that `ort` downloads into target/.../deps.
+#   2. llama-builder — builds llama.cpp's llama-server binary. fastrag spawns
+#                      this as a subprocess for both the Qwen3 embedder and
+#                      the BGE reranker (one subprocess per role).
+#   3. runtime       — debian:trixie-slim with fastrag, llama-server, tini, and
+#                      pre-staged GGUFs under $FASTRAG_MODEL_DIR. No network
+#                      access required at start-up.
+
+# -----------------------------------------------------------------------------
+# 1. Rust builder
+# -----------------------------------------------------------------------------
+FROM rust:1.89-trixie AS rust-builder
+WORKDIR /build
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        pkg-config libssl-dev ca-certificates build-essential cmake git \
+    && rm -rf /var/lib/apt/lists/*
+COPY . .
+RUN cargo build --release -p fastrag-cli \
+        --no-default-features \
+        --features language-detection,retrieval,rerank-llama,store \
+    && strip target/release/fastrag
+
+# The `ort` crate (with `download-binaries` + `copy-dylibs`) drops the ONNX
+# Runtime shared object into target/release/. Collect it for the runtime
+# image; the fastrag binary loads it via rpath at `$ORIGIN`.
+RUN mkdir -p /out/lib && \
+    find target/release -maxdepth 3 -name 'libonnxruntime*.so*' \
+        -exec cp -v {} /out/lib/ \;
+
+# -----------------------------------------------------------------------------
+# 2. llama.cpp builder (produces llama-server)
+# -----------------------------------------------------------------------------
+FROM debian:trixie-slim AS llama-builder
+ARG LLAMA_CPP_REF=b8739
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git cmake build-essential ca-certificates curl libcurl4-openssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+# Blobless clone: full commit history (needed for `git rev-list --count HEAD`
+# that sets BUILD_NUMBER in llama.cpp's build-info), no blob content. A depth-1
+# clone here makes BUILD_NUMBER collapse to 1, and fastrag rejects any
+# llama-server < b5000.
+RUN git clone --filter=blob:none --branch ${LLAMA_CPP_REF} \
+        https://github.com/ggerganov/llama.cpp.git /src/llama.cpp \
+    && cmake -S /src/llama.cpp -B /src/build \
+             -DGGML_NATIVE=OFF \
+             -DCMAKE_BUILD_TYPE=Release \
+             -DLLAMA_BUILD_SERVER=ON \
+    && cmake --build /src/build -j --target llama-server \
+    && strip /src/build/bin/llama-server
+
+# -----------------------------------------------------------------------------
+# 3. Runtime image
+# -----------------------------------------------------------------------------
+FROM debian:trixie-slim
+
+ARG EMBED_GGUF_URL=https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-Q8_0.gguf
+ARG RERANK_GGUF_URL=https://huggingface.co/klnstpr/bge-reranker-v2-m3-Q8_0-GGUF/resolve/main/bge-reranker-v2-m3-q8_0.gguf
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        tini ca-certificates curl libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /opt/fastrag/models /var/lib/fastrag/bundles /opt/fastrag/lib
+
+# fastrag binary + ONNX Runtime dylib (fastrag dlopens it at startup)
+COPY --from=rust-builder /build/target/release/fastrag /usr/local/bin/fastrag
+COPY --from=rust-builder /out/lib/ /opt/fastrag/lib/
+
+# llama-server binary + its shared libraries. Libs land at /opt/fastrag/lib
+# so LD_LIBRARY_PATH picks them up alongside libonnxruntime.
+COPY --from=llama-builder /src/build/bin/llama-server /usr/local/bin/llama-server
+COPY --from=llama-builder /src/build/bin/libllama.so /opt/fastrag/lib/
+COPY --from=llama-builder /src/build/bin/libggml.so /opt/fastrag/lib/
+COPY --from=llama-builder /src/build/bin/libggml-base.so /opt/fastrag/lib/
+COPY --from=llama-builder /src/build/bin/libggml-cpu.so /opt/fastrag/lib/
+COPY --from=llama-builder /src/build/bin/libmtmd.so /opt/fastrag/lib/
+
+# llama.cpp libs have SONAME libfoo.so.0 but docker COPY dereferenced the
+# symlinks, so the dynamic linker can't find them. Recreate the SONAME links.
+RUN ln -s libggml-base.so /opt/fastrag/lib/libggml-base.so.0 \
+    && ln -s libggml-cpu.so  /opt/fastrag/lib/libggml-cpu.so.0 \
+    && ln -s libggml.so      /opt/fastrag/lib/libggml.so.0 \
+    && ln -s libllama.so     /opt/fastrag/lib/libllama.so.0 \
+    && ln -s libmtmd.so      /opt/fastrag/lib/libmtmd.so.0
+
+# Pre-stage GGUFs at the exact filenames fastrag's model resolver expects.
+# Keeping these names means FASTRAG_MODEL_DIR lookups hit the cache tier
+# and the HfHub downloader never runs.
+ADD --chmod=0644 ${EMBED_GGUF_URL}  /opt/fastrag/models/Qwen3-Embedding-0.6B-Q8_0.gguf
+ADD --chmod=0644 ${RERANK_GGUF_URL} /opt/fastrag/models/bge-reranker-v2-m3-q8_0.gguf
+
+COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+ENV FASTRAG_MODEL_DIR=/opt/fastrag/models \
+    LD_LIBRARY_PATH=/opt/fastrag/lib \
+    FASTRAG_LOG=info \
+    FASTRAG_LOG_FORMAT=json
+
+EXPOSE 8080
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]

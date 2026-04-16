@@ -212,5 +212,5 @@ Reusable prompts that keep main-context token usage low. To invoke a skill: read
 
 | Skill file | Model | When to use |
 |---|---|---|
-| `ci-watcher.md` | Haiku, background | After every `git push` — **mandatory** |
+| `ci-watcher.md` | Haiku, background | CI runs nightly only (not on push/PR). Use after manual `workflow_dispatch` or to check a nightly run. |
 | `doc-editor/SKILL.md` | Haiku, foreground | Before every `Edit` or `Write` to a `.md` file — **mandatory** |
