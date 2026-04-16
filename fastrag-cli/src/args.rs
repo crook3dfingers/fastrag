@@ -401,8 +401,8 @@ pub enum Command {
         #[arg(long, default_value_t = 4)]
         rrf_overfetch: usize,
 
-        /// Name of the `Date` metadata field to use for temporal decay.
-        /// Implies --hybrid.
+        /// Comma-separated `Date` metadata field names for temporal decay
+        /// (coalesce: first present field wins). Implies --hybrid.
         #[arg(long)]
         time_decay_field: Option<String>,
 

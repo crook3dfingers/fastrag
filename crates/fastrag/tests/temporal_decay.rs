@@ -75,7 +75,7 @@ fn decay_promotes_fresh_over_equally_relevant_stale() {
             rrf_k: 60,
             overfetch_factor: 4,
             temporal: Some(TemporalOpts {
-                date_field: "published_date".into(),
+                date_fields: vec!["published_date".into()],
                 halflife: Duration::from_secs(30 * 86_400),
                 weight_floor: 0.3,
                 dateless_prior: 0.5,

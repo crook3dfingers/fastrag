@@ -14,6 +14,7 @@ use fastrag_eval::{
     write_matrix_report,
 };
 
+#[allow(clippy::too_many_arguments)]
 pub fn run_config_matrix(
     gold_set_path: Option<PathBuf>,
     corpus: Option<PathBuf>,

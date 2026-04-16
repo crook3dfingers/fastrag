@@ -117,7 +117,7 @@ impl CorpusDriver for RealCorpusDriver<'_> {
                     rrf_k: 60,
                     overfetch_factor: 3,
                     temporal: Some(TemporalOpts {
-                        date_field: "published_date".to_string(),
+                        date_fields: vec!["published_date".to_string()],
                         halflife: Duration::from_secs(730 * 86_400),
                         weight_floor: 0.3,
                         dateless_prior: 1.0,

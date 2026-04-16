@@ -356,11 +356,20 @@ fastrag query "latest openssl advisory" \
     --time-decay-halflife 30d
 ```
 
+When documents carry different date fields (e.g. CVE records use `lastModified`, advisories use `updated_date`), pass a comma-separated list. The first field present on each chunk wins:
+
+```bash
+fastrag query "recent TLS advisory" \
+    --corpus ./corpus \
+    --time-decay-field "last_modified,published_date" \
+    --time-decay-halflife 30d
+```
+
 A decay factor in `[α, 1.0]` is computed per chunk from its age, then applied to the fused score. α is the floor set by `--time-decay-weight`. Passing any `--time-decay-*` flag implies `--hybrid`.
 
 | Flag | Default | Purpose |
 |---|---|---|
-| `--time-decay-field <name>` | — | Metadata date field; required to enable decay |
+| `--time-decay-field <names>` | — | Comma-separated date field names (first present wins); required to enable decay |
 | `--time-decay-halflife <humantime>` | `30d` | Half-life for the exponential decay (`7d`, `1y`, …) |
 | `--time-decay-weight <float>` | `0.3` | Floor α — the minimum factor very old docs converge to |
 | `--time-decay-dateless-prior <float>` | `0.5` | Factor applied to chunks with no date |
@@ -379,9 +388,9 @@ score' = fused · factor
 score' = α · norm(fused) + (1 − α) · factor
 ```
 
-Date metadata is typed at ingest time through JSONL ingestion with `--metadata-types published_date=date`. Chunks missing the field fall back to `--time-decay-dateless-prior`.
+Date metadata is typed at ingest time through JSONL ingestion with `--metadata-types published_date=date`. Chunks missing all listed fields fall back to `--time-decay-dateless-prior`.
 
-The HTTP `/query` endpoint accepts every flag as a snake-cased query-string param: `?time_decay_field=published_date&time_decay_halflife=30d&time_decay_weight=0.3&time_decay_blend=additive`. The MCP `search_corpus` tool accepts the same names in its params object. Invalid values (e.g. `time_decay_blend=bogus`) return HTTP 400.
+The HTTP `/query` endpoint accepts every flag as a snake-cased query-string param: `?time_decay_field=last_modified,published_date&time_decay_halflife=30d&time_decay_weight=0.3&time_decay_blend=additive`. The MCP `search_corpus` tool accepts the same names in its params object. Invalid values (e.g. `time_decay_blend=bogus`) return HTTP 400.
 
 ### Similarity Search
 

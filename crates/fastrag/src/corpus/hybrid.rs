@@ -35,7 +35,7 @@ impl Default for HybridOpts {
 
 #[derive(Debug, Clone)]
 pub struct TemporalOpts {
-    pub date_field: String,
+    pub date_fields: Vec<String>,
     pub halflife: Duration,
     pub weight_floor: f32,
     pub dateless_prior: f32,
@@ -213,7 +213,7 @@ mod apply_decay_tests {
 
     fn opts(halflife_days: u64, alpha: f32, prior: f32) -> TemporalOpts {
         TemporalOpts {
-            date_field: "published_date".into(),
+            date_fields: vec!["published_date".into()],
             halflife: Duration::from_secs(halflife_days * 86_400),
             weight_floor: alpha,
             dateless_prior: prior,
@@ -344,6 +344,18 @@ pub fn extract_date(
     })
 }
 
+/// Try each field name in `date_fields` in order, returning the first `Date`
+/// value found. Enables coalesce semantics: `["last_modified", "published_date"]`
+/// picks `last_modified` when present, falls back to `published_date`.
+pub fn extract_date_coalesce(
+    fields: &[(String, fastrag_store::schema::TypedValue)],
+    date_fields: &[String],
+) -> Option<NaiveDate> {
+    date_fields
+        .iter()
+        .find_map(|name| extract_date(fields, name))
+}
+
 #[cfg(test)]
 mod extract_date_tests {
     use super::*;
@@ -379,6 +391,51 @@ mod extract_date_tests {
             TypedValue::String("2024-06-01".into()),
         )];
         assert_eq!(extract_date(&rows, "published_date"), None);
+    }
+
+    #[test]
+    fn coalesce_returns_first_present_field() {
+        let rows = vec![
+            field(
+                "last_modified",
+                TypedValue::Date(NaiveDate::from_ymd_opt(2025, 1, 15).unwrap()),
+            ),
+            field(
+                "published_date",
+                TypedValue::Date(NaiveDate::from_ymd_opt(2024, 6, 1).unwrap()),
+            ),
+        ];
+        let d = extract_date_coalesce(&rows, &["last_modified".into(), "published_date".into()]);
+        assert_eq!(d, NaiveDate::from_ymd_opt(2025, 1, 15));
+    }
+
+    #[test]
+    fn coalesce_falls_through_missing_to_second() {
+        let rows = vec![field(
+            "published_date",
+            TypedValue::Date(NaiveDate::from_ymd_opt(2024, 6, 1).unwrap()),
+        )];
+        let d = extract_date_coalesce(&rows, &["last_modified".into(), "published_date".into()]);
+        assert_eq!(d, NaiveDate::from_ymd_opt(2024, 6, 1));
+    }
+
+    #[test]
+    fn coalesce_returns_none_when_no_field_matches() {
+        let rows = vec![field("other", TypedValue::String("x".into()))];
+        let d = extract_date_coalesce(&rows, &["last_modified".into(), "published_date".into()]);
+        assert_eq!(d, None);
+    }
+
+    #[test]
+    fn coalesce_single_field_matches_extract_date() {
+        let rows = vec![field(
+            "published_date",
+            TypedValue::Date(NaiveDate::from_ymd_opt(2024, 6, 1).unwrap()),
+        )];
+        assert_eq!(
+            extract_date_coalesce(&rows, &["published_date".into()]),
+            extract_date(&rows, "published_date"),
+        );
     }
 }
 
@@ -424,7 +481,7 @@ pub fn build_hybrid_opts_from_parts(
         let halflife = humantime::parse_duration(time_decay_halflife)
             .map_err(|e| format!("time_decay_halflife: {e}"))?;
         Some(TemporalOpts {
-            date_field: field,
+            date_fields: field.split(',').map(|s| s.trim().to_string()).collect(),
             halflife,
             weight_floor: time_decay_weight,
             dateless_prior: time_decay_dateless_prior,
@@ -505,7 +562,7 @@ mod build_hybrid_opts_tests {
             temporal.halflife,
             std::time::Duration::from_secs(14 * 86400)
         );
-        assert_eq!(temporal.date_field, "published_date");
+        assert_eq!(temporal.date_fields, vec!["published_date".to_string()]);
         assert!(
             (temporal.weight_floor - 0.4).abs() < 1e-6,
             "weight_floor mismatch"
@@ -513,6 +570,26 @@ mod build_hybrid_opts_tests {
         assert!(
             (temporal.dateless_prior - 0.6).abs() < 1e-6,
             "dateless_prior mismatch"
+        );
+    }
+
+    #[test]
+    fn build_hybrid_opts_comma_separated_date_fields() {
+        let opts = build_hybrid_opts_from_parts(
+            false,
+            60,
+            4,
+            Some("last_modified, published_date".to_string()),
+            "30d",
+            0.3,
+            0.5,
+            "multiplicative",
+        )
+        .unwrap();
+        let temporal = opts.temporal.expect("temporal must be Some");
+        assert_eq!(
+            temporal.date_fields,
+            vec!["last_modified".to_string(), "published_date".to_string()]
         );
     }
 }
@@ -580,7 +657,7 @@ pub fn query_hybrid(
             .map(|s| {
                 row_map
                     .get(&s.id)
-                    .and_then(|f| extract_date(f, &temp.date_field))
+                    .and_then(|f| extract_date_coalesce(f, &temp.date_fields))
             })
             .collect();
         fused = apply_decay(&fused, &dates, temp);
@@ -678,7 +755,7 @@ mod query_hybrid_tests {
             rrf_k: 60,
             overfetch_factor: 4,
             temporal: Some(TemporalOpts {
-                date_field: "published_date".into(),
+                date_fields: vec!["published_date".into()],
                 halflife: Duration::from_secs(30 * 86400),
                 weight_floor: 0.3,
                 dateless_prior: 0.5,
