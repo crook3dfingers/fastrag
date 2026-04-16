@@ -198,6 +198,75 @@ fn default_snippet_len() -> usize {
     150
 }
 
+/// Request body for POST /query.
+///
+/// Mirrors the GET /query query-string params but adds first-class `temporal_policy`
+/// and `date_fields` fields. Precedence rule for temporal settings:
+///
+/// 1. If `temporal_policy` is explicitly set in the body (`"off"` or `{favor_recent: …}`),
+///    use it verbatim and take `date_fields` from the body.
+/// 2. Else if legacy `time_decay_field` is set, bridge it to `FavorRecent(Medium)` as
+///    Task 9 did (backward-compat path).
+/// 3. Else default to `Auto` with no date fields (abstaining detector path).
+///
+/// Note: if the body sends `"auto"` and legacy `time_decay_field` is also set, the
+/// explicit `Auto` is indistinguishable from the default, so rule 2 takes effect.
+/// This is acceptable — `"auto"` + a decay field is a degenerate case.
+#[derive(Debug, Deserialize)]
+struct PostQueryBody {
+    q: String,
+    #[serde(default = "default_top_k")]
+    top_k: usize,
+    /// Accepts either string syntax ("severity = HIGH") or JSON AST (FilterExpr).
+    #[serde(default)]
+    filter: Option<serde_json::Value>,
+    /// Named corpus to query. Defaults to `"default"`.
+    #[serde(default)]
+    corpus: Option<String>,
+    /// Max characters for snippet. 0 disables. Default 150.
+    #[serde(default = "default_snippet_len")]
+    snippet_len: usize,
+    /// Comma-separated field projection (e.g. "score,snippet" or "-chunk_text").
+    #[serde(default)]
+    fields: Option<String>,
+    /// Override server default `--cwe-expand`.
+    #[serde(default)]
+    cwe_expand: Option<bool>,
+    /// Enable BM25 + dense hybrid retrieval via RRF.
+    #[serde(default)]
+    hybrid: Option<bool>,
+    /// RRF k. Default 60.
+    #[serde(default)]
+    rrf_k: Option<u32>,
+    /// Per-retriever overfetch multiplier.
+    #[serde(default)]
+    rrf_overfetch: Option<usize>,
+    /// Per-query temporal policy. Default `auto` (abstaining detector).
+    #[serde(default)]
+    temporal_policy: fastrag::corpus::temporal::TemporalPolicy,
+    /// Ordered list of date metadata field names for decay. Empty disables decay.
+    #[serde(default)]
+    date_fields: Vec<String>,
+    // Legacy time_decay_* fields — accepted for backward-compat, bridged to
+    // `FavorRecent(Medium)` when `temporal_policy` is default `Auto`.
+    #[serde(default)]
+    time_decay_field: Option<String>,
+    #[serde(default)]
+    time_decay_halflife: Option<String>,
+    #[serde(default)]
+    time_decay_weight: Option<f32>,
+    #[serde(default)]
+    time_decay_dateless_prior: Option<f32>,
+    #[serde(default)]
+    time_decay_blend: Option<String>,
+    /// Set to `off` to skip reranking for this request.
+    #[serde(default)]
+    rerank: Option<String>,
+    /// Override the rerank over-fetch multiplier for this request.
+    #[serde(default)]
+    over_fetch: Option<usize>,
+}
+
 #[derive(Debug, serde::Deserialize)]
 struct BatchQueryRequest {
     queries: Vec<BatchQueryItem>,
@@ -610,7 +679,7 @@ pub async fn serve_http_with_registry(
 
     // /health stays unauthenticated for liveness probes.
     let protected = Router::new()
-        .route("/query", get(query))
+        .route("/query", get(query).post(post_query))
         .route(
             "/batch-query",
             axum::routing::post(batch_query_handler).layer(DefaultBodyLimit::max(10 * 1024 * 1024)), // 10 MB
@@ -975,6 +1044,79 @@ async fn stats_handler(
     Ok(Json(serde_json::to_value(stats).unwrap()))
 }
 
+/// Resolved parameters for the core query dispatcher.
+struct QueryCoreArgs<'a> {
+    q: &'a str,
+    top_k: usize,
+    snippet_len: usize,
+    cwe_expand: bool,
+    rerank_skip: bool,
+    over_fetch_override: Option<usize>,
+    filter: Option<&'a fastrag::filter::FilterExpr>,
+    corpus_name: &'a str,
+    hybrid: fastrag::corpus::hybrid::HybridOpts,
+    temporal_policy: fastrag::corpus::temporal::TemporalPolicy,
+    date_fields: Vec<String>,
+}
+
+/// Core query dispatcher shared by the GET and POST /query handlers.
+///
+/// Callers must resolve `temporal_policy` and `date_fields` before calling this;
+/// the GET handler applies the legacy bridge (time_decay_field → FavorRecent(Medium)),
+/// the POST handler uses the body fields directly.
+fn run_query_core(
+    state: &AppState,
+    args: QueryCoreArgs<'_>,
+) -> Result<Vec<SearchHitDto>, CorpusError> {
+    let corpus_dir = state
+        .registry
+        .corpus_path(args.corpus_name)
+        .ok_or_else(|| CorpusError::NotFound(args.corpus_name.to_string()))?;
+
+    // dense_only is a server-level flag; per-request hybrid opts take precedence.
+    let _ = state.dense_only;
+
+    let query_opts = ops::QueryOpts {
+        cwe_expand: args.cwe_expand,
+        hybrid: args.hybrid,
+        temporal_policy: args.temporal_policy,
+        date_fields: args.date_fields,
+    };
+
+    #[cfg(feature = "rerank")]
+    if !args.rerank_skip
+        && let Some(ref reranker) = state.reranker
+    {
+        let over_fetch = args.over_fetch_override.unwrap_or(state.rerank_over_fetch);
+        return ops::query_corpus_reranked_opts(
+            &corpus_dir,
+            args.q,
+            args.top_k,
+            over_fetch,
+            state.embedder.as_ref() as &dyn DynEmbedderTrait,
+            reranker.as_ref(),
+            args.filter,
+            &query_opts,
+            &mut fastrag::corpus::LatencyBreakdown::default(),
+            args.snippet_len,
+        );
+    }
+
+    #[cfg(not(feature = "rerank"))]
+    let _ = (args.rerank_skip, args.over_fetch_override);
+
+    ops::query_corpus_with_filter_opts(
+        &corpus_dir,
+        args.q,
+        args.top_k,
+        state.embedder.as_ref() as &dyn DynEmbedderTrait,
+        args.filter,
+        &query_opts,
+        &mut fastrag::corpus::LatencyBreakdown::default(),
+        args.snippet_len,
+    )
+}
+
 fn run_query(
     state: &AppState,
     params: &QueryParams,
@@ -982,13 +1124,6 @@ fn run_query(
     corpus_name: &str,
     hybrid: fastrag::corpus::hybrid::HybridOpts,
 ) -> Result<Vec<SearchHitDto>, CorpusError> {
-    let corpus_dir = state
-        .registry
-        .corpus_path(corpus_name)
-        .ok_or_else(|| CorpusError::NotFound(corpus_name.to_string()))?;
-
-    let _ = state.dense_only; // dense_only is a server-level flag; per-request hybrid opts take precedence
-
     // If the caller supplied a time_decay_field, bridge it into the new
     // late-stage temporal policy path.  Default to FavorRecent(Medium); the
     // legacy halflife/weight/prior/blend params are accepted for compatibility
@@ -1003,42 +1138,21 @@ fn run_query(
         None => (Default::default(), vec![]),
     };
 
-    let query_opts = ops::QueryOpts {
-        cwe_expand: params.cwe_expand.unwrap_or(state.cwe_expand_default),
-        hybrid,
-        temporal_policy,
-        date_fields,
-    };
-
-    #[cfg(feature = "rerank")]
-    {
-        let skip = params.rerank.as_deref() == Some("off");
-        if !skip && let Some(ref reranker) = state.reranker {
-            let over_fetch = params.over_fetch.unwrap_or(state.rerank_over_fetch);
-            return ops::query_corpus_reranked_opts(
-                &corpus_dir,
-                &params.q,
-                params.top_k,
-                over_fetch,
-                state.embedder.as_ref() as &dyn DynEmbedderTrait,
-                reranker.as_ref(),
-                filter,
-                &query_opts,
-                &mut fastrag::corpus::LatencyBreakdown::default(),
-                params.snippet_len,
-            );
-        }
-    }
-
-    ops::query_corpus_with_filter_opts(
-        &corpus_dir,
-        &params.q,
-        params.top_k,
-        state.embedder.as_ref() as &dyn DynEmbedderTrait,
-        filter,
-        &query_opts,
-        &mut fastrag::corpus::LatencyBreakdown::default(),
-        params.snippet_len,
+    run_query_core(
+        state,
+        QueryCoreArgs {
+            q: &params.q,
+            top_k: params.top_k,
+            snippet_len: params.snippet_len,
+            cwe_expand: params.cwe_expand.unwrap_or(state.cwe_expand_default),
+            rerank_skip: params.rerank.as_deref() == Some("off"),
+            over_fetch_override: params.over_fetch,
+            filter,
+            corpus_name,
+            hybrid,
+            temporal_policy,
+            date_fields,
+        },
     )
 }
 
@@ -1302,6 +1416,145 @@ async fn query(
         }
         Err(err) => {
             warn!(error = %err, "query failed");
+            Err((StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response())
+        }
+    }
+}
+
+async fn post_query(
+    State(state): State<AppState>,
+    tenant_ext: Option<Extension<TenantFilter>>,
+    Json(body): Json<PostQueryBody>,
+) -> Result<Json<Vec<serde_json::Value>>, Response> {
+    let field_sel = match parse_field_selection(body.fields.as_deref()) {
+        Ok(sel) => sel,
+        Err(e) => return Err((StatusCode::BAD_REQUEST, e).into_response()),
+    };
+
+    let span = info_span!(
+        "post_query",
+        q = %body.q,
+        top_k = body.top_k,
+        hit_count = tracing::field::Empty,
+        latency_ms = tracing::field::Empty,
+    );
+    let _enter = span.enter();
+    let start = Instant::now();
+
+    let base_filter: Option<fastrag::filter::FilterExpr> = match &body.filter {
+        None => None,
+        Some(serde_json::Value::String(s)) => match fastrag::filter::parse(s) {
+            Ok(f) => Some(f),
+            Err(e) => {
+                return Err((StatusCode::BAD_REQUEST, format!("bad filter: {e}")).into_response());
+            }
+        },
+        Some(json_val) => match serde_json::from_value(json_val.clone()) {
+            Ok(f) => Some(f),
+            Err(e) => {
+                return Err((StatusCode::BAD_REQUEST, format!("bad filter: {e}")).into_response());
+            }
+        },
+    };
+
+    let filter_expr: Option<fastrag::filter::FilterExpr> = if let Some(Extension(tf)) = tenant_ext {
+        let tenant_cond = fastrag::filter::FilterExpr::Eq {
+            field: tf.field.clone(),
+            value: fastrag_store::schema::TypedValue::String(tf.value.clone()),
+        };
+        Some(match base_filter {
+            Some(existing) => fastrag::filter::FilterExpr::And(vec![tenant_cond, existing]),
+            None => tenant_cond,
+        })
+    } else {
+        base_filter
+    };
+
+    // Validate + build hybrid opts.
+    let hybrid_opts = fastrag::corpus::hybrid::build_hybrid_opts_from_parts(
+        body.hybrid.unwrap_or(false),
+        body.rrf_k.unwrap_or(60),
+        body.rrf_overfetch.unwrap_or(4),
+        // Pass legacy time_decay_field through so HybridOpts is populated when
+        // only the legacy params are used; the temporal_policy bridge below handles
+        // which policy actually fires.
+        body.time_decay_field.clone(),
+        body.time_decay_halflife.as_deref().unwrap_or("30d"),
+        body.time_decay_weight.unwrap_or(0.3),
+        body.time_decay_dateless_prior.unwrap_or(0.5),
+        body.time_decay_blend.as_deref().unwrap_or("multiplicative"),
+    )
+    .map_err(|e| (StatusCode::BAD_REQUEST, e).into_response())?;
+
+    // Precedence for temporal settings (see PostQueryBody doc comment):
+    // 1. explicit temporal_policy in body (non-default) + body.date_fields
+    // 2. legacy time_decay_field → FavorRecent(Medium)
+    // 3. default Auto, no date fields
+    let (temporal_policy, date_fields) =
+        if body.temporal_policy != fastrag::corpus::temporal::TemporalPolicy::Auto {
+            // Explicit non-default policy supplied — use it verbatim.
+            (body.temporal_policy, body.date_fields)
+        } else if let Some(ref field) = body.time_decay_field {
+            // Legacy bridge: time_decay_field set, temporal_policy is default Auto.
+            (
+                fastrag::corpus::temporal::TemporalPolicy::FavorRecent(
+                    fastrag::corpus::temporal::Strength::Medium,
+                ),
+                vec![field.clone()],
+            )
+        } else if !body.date_fields.is_empty() {
+            // date_fields provided without an explicit policy — default to Auto
+            // (abstaining detector will decide per query).
+            (
+                fastrag::corpus::temporal::TemporalPolicy::Auto,
+                body.date_fields,
+            )
+        } else {
+            (Default::default(), vec![])
+        };
+
+    let corpus_name = body.corpus.as_deref().unwrap_or("default");
+    let lock = get_or_create_lock(&state.ingest_locks, corpus_name);
+    let _read_guard = lock.read().await;
+    let result = run_query_core(
+        &state,
+        QueryCoreArgs {
+            q: &body.q,
+            top_k: body.top_k,
+            snippet_len: body.snippet_len,
+            cwe_expand: body.cwe_expand.unwrap_or(state.cwe_expand_default),
+            rerank_skip: body.rerank.as_deref() == Some("off"),
+            over_fetch_override: body.over_fetch,
+            filter: filter_expr.as_ref(),
+            corpus_name,
+            hybrid: hybrid_opts,
+            temporal_policy,
+            date_fields,
+        },
+    );
+
+    let elapsed = start.elapsed();
+    metrics::counter!("fastrag_query_total").increment(1);
+    metrics::histogram!("fastrag_query_duration_seconds").record(elapsed.as_secs_f64());
+    span.record("latency_ms", elapsed.as_millis() as u64);
+
+    match result {
+        Ok(hits) => {
+            span.record("hit_count", hits.len());
+            info!("post_query served");
+            let mut json_hits: Vec<serde_json::Value> = hits
+                .iter()
+                .map(|h| serde_json::to_value(h).unwrap())
+                .collect();
+            apply_field_selection(&mut json_hits, &field_sel);
+            Ok(Json(json_hits))
+        }
+        Err(CorpusError::NotFound(_)) => {
+            warn!(corpus = corpus_name, "corpus not found");
+            Err((StatusCode::NOT_FOUND, "corpus not found").into_response())
+        }
+        Err(err) => {
+            warn!(error = %err, "post_query failed");
             Err((StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response())
         }
     }
