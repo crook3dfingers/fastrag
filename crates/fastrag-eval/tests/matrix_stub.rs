@@ -23,6 +23,7 @@ impl CorpusDriver for StubDriver {
         _question: &str,
         _query_vector: &[f32],
         _top_k: usize,
+        _intent: Option<fastrag::corpus::temporal::TemporalIntent>,
         breakdown: &mut LatencyBreakdown,
     ) -> Result<Vec<String>, EvalError> {
         // Deterministic per-stage latencies so histograms always have non-zero values.
@@ -201,4 +202,33 @@ fn run_matrix_truncated_gold_set_limits_per_question() {
             variant_report.variant
         );
     }
+}
+
+#[test]
+fn run_matrix_with_oracle_populates_oracle_run() {
+    let gs = single_entry_gold_set();
+    let variants = ConfigVariant::canonical_plus_oracle();
+    let report =
+        run_matrix(&StubDriver, &gs, 5, Some(&variants)).expect("run_matrix should succeed");
+    assert_eq!(
+        report.runs.len(),
+        6,
+        "expected 6 runs with canonical_plus_oracle"
+    );
+    let oracle_run = report
+        .runs
+        .iter()
+        .find(|r| r.variant == ConfigVariant::TemporalOracle)
+        .expect("oracle run must be present");
+    // StubDriver returns a hit for all non-DenseOnly variants.
+    assert!(oracle_run.hit_at_1 > 0.0, "oracle run should hit at 1");
+    let temporal_auto_run = report
+        .runs
+        .iter()
+        .find(|r| r.variant == ConfigVariant::TemporalAuto)
+        .expect("temporal_auto run must be present");
+    assert!(
+        temporal_auto_run.hit_at_1 > 0.0,
+        "temporal_auto run should hit at 1"
+    );
 }

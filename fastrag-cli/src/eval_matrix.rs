@@ -65,7 +65,7 @@ pub fn run_config_matrix(
             .map(|label| {
                 ConfigVariant::from_label(label.trim()).unwrap_or_else(|| {
                     panic!(
-                        "unknown variant '{}'; valid: primary, no_rerank, no_contextual, dense_only",
+                        "unknown variant '{}'; valid: primary, no_rerank, no_contextual, dense_only, temporal_auto, temporal_oracle",
                         label.trim()
                     )
                 })

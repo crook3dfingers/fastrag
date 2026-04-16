@@ -28,10 +28,13 @@ pub enum ConfigVariant {
     DenseOnly,
     /// Full stack + query-conditional temporal decay applied post-rerank (late injection).
     TemporalAuto,
+    /// Eval-only: routes via gold-set `axes.temporal_intent` instead of
+    /// the regex detector. Upper bound on regex quality.
+    TemporalOracle,
 }
 
 impl ConfigVariant {
-    /// All five variants in canonical order.
+    /// All five variants in canonical order. Does NOT include `TemporalOracle`.
     pub fn all() -> [ConfigVariant; 5] {
         [
             ConfigVariant::Primary,
@@ -39,6 +42,18 @@ impl ConfigVariant {
             ConfigVariant::NoContextual,
             ConfigVariant::DenseOnly,
             ConfigVariant::TemporalAuto,
+        ]
+    }
+
+    /// The canonical five variants plus `TemporalOracle` for diagnostic runs.
+    pub fn canonical_plus_oracle() -> [ConfigVariant; 6] {
+        [
+            ConfigVariant::Primary,
+            ConfigVariant::NoRerank,
+            ConfigVariant::NoContextual,
+            ConfigVariant::DenseOnly,
+            ConfigVariant::TemporalAuto,
+            ConfigVariant::TemporalOracle,
         ]
     }
 
@@ -50,6 +65,7 @@ impl ConfigVariant {
             "no_contextual" => Some(ConfigVariant::NoContextual),
             "dense_only" => Some(ConfigVariant::DenseOnly),
             "temporal_auto" => Some(ConfigVariant::TemporalAuto),
+            "temporal_oracle" => Some(ConfigVariant::TemporalOracle),
             _ => None,
         }
     }
@@ -62,6 +78,7 @@ impl ConfigVariant {
             ConfigVariant::NoContextual => "no_contextual",
             ConfigVariant::DenseOnly => "dense_only",
             ConfigVariant::TemporalAuto => "temporal_auto",
+            ConfigVariant::TemporalOracle => "temporal_oracle",
         }
     }
 }
@@ -153,12 +170,16 @@ pub trait CorpusDriver {
     fn embed_queries(&self, questions: &[&str]) -> Result<Vec<Vec<f32>>, EvalError>;
 
     /// Run retrieval + optional reranking using a pre-computed query vector.
+    ///
+    /// `intent` carries the gold-set temporal intent for the `TemporalOracle`
+    /// variant. All other variants may ignore it.
     fn query(
         &self,
         variant: ConfigVariant,
         question: &str,
         query_vector: &[f32],
         top_k: usize,
+        intent: Option<fastrag::corpus::temporal::TemporalIntent>,
         breakdown: &mut LatencyBreakdown,
     ) -> Result<Vec<String>, EvalError>;
 }
@@ -189,6 +210,17 @@ fn git_rev() -> Option<String> {
         Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
     } else {
         None
+    }
+}
+
+/// Map gold-set `TemporalIntent` to the core `fastrag::corpus::temporal::TemporalIntent`.
+fn axes_to_core(ti: crate::gold_set::TemporalIntent) -> fastrag::corpus::temporal::TemporalIntent {
+    use crate::gold_set::TemporalIntent as A;
+    use fastrag::corpus::temporal::TemporalIntent as C;
+    match ti {
+        A::Historical => C::Historical,
+        A::Neutral => C::Neutral,
+        A::RecencySeeking => C::RecencySeeking,
     }
 }
 
@@ -253,8 +285,17 @@ pub fn run_matrix<D: CorpusDriver>(
                 embed_us: per_query_embed_us,
                 ..Default::default()
             };
+            // Map gold-set axes temporal_intent → core TemporalIntent for oracle.
+            let intent = axes_to_core(entry.axes.temporal_intent);
             let chunks = driver
-                .query(*variant, &entry.question, vector, top_k, &mut bd)
+                .query(
+                    *variant,
+                    &entry.question,
+                    vector,
+                    top_k,
+                    Some(intent),
+                    &mut bd,
+                )
                 .map_err(|e| EvalError::MatrixVariant {
                     variant: *variant,
                     source: Box::new(e),
@@ -394,5 +435,29 @@ mod tests {
             assert_eq!(ConfigVariant::from_label(v.label()), Some(v));
         }
         assert_eq!(ConfigVariant::from_label("bogus"), None);
+    }
+
+    #[test]
+    fn oracle_label_round_trips() {
+        assert_eq!(
+            ConfigVariant::from_label("temporal_oracle"),
+            Some(ConfigVariant::TemporalOracle)
+        );
+        assert_eq!(ConfigVariant::TemporalOracle.label(), "temporal_oracle");
+    }
+
+    #[test]
+    fn oracle_not_in_default_all() {
+        for v in ConfigVariant::all() {
+            assert_ne!(v, ConfigVariant::TemporalOracle);
+        }
+    }
+
+    #[test]
+    fn canonical_plus_oracle_includes_oracle() {
+        let all = ConfigVariant::canonical_plus_oracle();
+        assert_eq!(all.len(), 6);
+        assert!(all.contains(&ConfigVariant::TemporalOracle));
+        assert!(all.contains(&ConfigVariant::TemporalAuto));
     }
 }

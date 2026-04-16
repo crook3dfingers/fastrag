@@ -19,7 +19,7 @@ use std::time::Instant;
 use chrono::Utc;
 use fastrag::corpus::LatencyBreakdown;
 use fastrag::corpus::hybrid::{HybridOpts, extract_date_coalesce, query_hybrid};
-use fastrag::corpus::temporal::{AbstainingRegexDetector, TemporalPolicy, apply_temporal_policy};
+use fastrag::corpus::temporal::{AbstainingRegexDetector, TemporalPolicy};
 use fastrag_embed::{DynEmbedderTrait, QueryText};
 use fastrag_rerank::{RerankHit, Reranker};
 use fastrag_store::Store;
@@ -78,6 +78,7 @@ impl CorpusDriver for RealCorpusDriver<'_> {
         question: &str,
         query_vector: &[f32],
         top_k: usize,
+        intent: Option<fastrag::corpus::temporal::TemporalIntent>,
         breakdown: &mut LatencyBreakdown,
     ) -> Result<Vec<String>, EvalError> {
         let store = match variant {
@@ -92,7 +93,8 @@ impl CorpusDriver for RealCorpusDriver<'_> {
             ConfigVariant::Primary
             | ConfigVariant::NoContextual
             | ConfigVariant::NoRerank
-            | ConfigVariant::TemporalAuto => {
+            | ConfigVariant::TemporalAuto
+            | ConfigVariant::TemporalOracle => {
                 let opts = HybridOpts {
                     enabled: true,
                     rrf_k: 60,
@@ -137,6 +139,7 @@ impl CorpusDriver for RealCorpusDriver<'_> {
                 | ConfigVariant::NoContextual
                 | ConfigVariant::DenseOnly
                 | ConfigVariant::TemporalAuto
+                | ConfigVariant::TemporalOracle
         );
 
         let mut ordered_texts: Vec<String> = if needs_rerank {
@@ -196,8 +199,13 @@ impl CorpusDriver for RealCorpusDriver<'_> {
                 (rh.id, text, rh.score)
             }));
 
-            // ── TemporalAuto: late-injection query-conditional decay ──────────
-            if matches!(variant, ConfigVariant::TemporalAuto) {
+            // ── TemporalAuto / TemporalOracle: late-injection decay ───────────
+            if matches!(
+                variant,
+                ConfigVariant::TemporalAuto | ConfigVariant::TemporalOracle
+            ) {
+                use fastrag::corpus::temporal::{OracleDetector, apply_temporal_policy};
+
                 let ids: Vec<u64> = pairs_with_id.iter().map(|(id, _, _)| *id).collect();
                 let rows = store
                     .fetch_metadata(&ids)
@@ -216,15 +224,33 @@ impl CorpusDriver for RealCorpusDriver<'_> {
 
                 let pairs: Vec<(u64, f32)> =
                     pairs_with_id.iter().map(|(id, _, s)| (*id, *s)).collect();
-                let det = AbstainingRegexDetector::new();
-                let decayed = apply_temporal_policy(
-                    &pairs,
-                    &TemporalPolicy::Auto,
-                    question,
-                    &det,
-                    &dates,
-                    Utc::now(),
-                );
+
+                let decayed = match variant {
+                    ConfigVariant::TemporalAuto => {
+                        let det = AbstainingRegexDetector::new();
+                        apply_temporal_policy(
+                            &pairs,
+                            &TemporalPolicy::Auto,
+                            question,
+                            &det,
+                            &dates,
+                            Utc::now(),
+                        )
+                    }
+                    ConfigVariant::TemporalOracle => {
+                        let det = OracleDetector::new(intent);
+                        apply_temporal_policy(
+                            &pairs,
+                            &TemporalPolicy::Auto,
+                            question,
+                            &det,
+                            &dates,
+                            Utc::now(),
+                        )
+                    }
+                    _ => unreachable!(),
+                };
+
                 let score_by_id: HashMap<u64, f32> = decayed.into_iter().collect();
                 for triple in pairs_with_id.iter_mut() {
                     if let Some(&s) = score_by_id.get(&triple.0) {

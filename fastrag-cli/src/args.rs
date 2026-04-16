@@ -590,8 +590,10 @@ pub enum Command {
         #[arg(long, default_value_t = false)]
         config_matrix: bool,
 
-        /// Comma-separated variant labels to run (default: all four).
-        /// Values: primary, no_rerank, no_contextual, dense_only
+        /// Comma-separated variant labels to run (default: canonical 5-variant set).
+        /// Values: primary, no_rerank, no_contextual, dense_only, temporal_auto, temporal_oracle
+        ///
+        /// Example: --variants primary,temporal_auto,temporal_oracle
         #[arg(long)]
         variants: Option<String>,
 
