@@ -84,15 +84,25 @@ pub async fn build_router_with_bundle_dag(
 }
 
 fn write_minimal_bundle(root: &Path) {
+    write_bundle_with_id(root, "test");
+}
+
+/// Build a minimally valid bundle rooted at `root` with the given
+/// `bundle_id`. Used by the multi-bundle helpers below so reload tests can
+/// verify `bundle_id` / `previous_bundle_id` flip on swap.
+fn write_bundle_with_id(root: &Path, bundle_id: &str) {
+    std::fs::create_dir_all(root).unwrap();
     std::fs::write(
         root.join("bundle.json"),
-        r#"{
+        format!(
+            r#"{{
             "schema_version": 1,
-            "bundle_id": "test",
+            "bundle_id": "{bundle_id}",
             "built_at": "2026-04-16T00:00:00Z",
             "corpora": ["cve","cwe","kev"],
             "taxonomy": "cwe-taxonomy.json"
-        }"#,
+        }}"#
+        ),
     )
     .unwrap();
     std::fs::create_dir_all(root.join("taxonomy")).unwrap();
@@ -109,4 +119,53 @@ fn write_minimal_bundle(root: &Path) {
         std::fs::write(d.join("index.bin"), b"").unwrap();
         std::fs::write(d.join("entries.bin"), b"").unwrap();
     }
+}
+
+/// Build a router against a `bundles-dir` containing `fastrag-first/` and
+/// `fastrag-second/`, with `fastrag-first` loaded. The server's
+/// `bundles_dir` is set to the parent `TempDir` so `/admin/reload` can
+/// resolve either sibling directory name.
+pub async fn build_router_with_two_bundles(
+    admin_token: Option<String>,
+    embedder: DynEmbedder,
+) -> (axum::Router, tempfile::TempDir) {
+    build_router_with_two_bundles_inner(admin_token, embedder, None).await
+}
+
+/// Same as [`build_router_with_two_bundles`] but injects a 500ms sleep into
+/// the `/admin/reload` handler while it holds the reload mutex, so tests
+/// can deterministically observe the 409 `reload_in_progress` branch when
+/// two requests race.
+pub async fn build_router_with_two_bundles_slow(
+    admin_token: Option<String>,
+    embedder: DynEmbedder,
+) -> (axum::Router, tempfile::TempDir) {
+    build_router_with_two_bundles_inner(
+        admin_token,
+        embedder,
+        Some(std::time::Duration::from_millis(500)),
+    )
+    .await
+}
+
+async fn build_router_with_two_bundles_inner(
+    admin_token: Option<String>,
+    embedder: DynEmbedder,
+    reload_delay: Option<std::time::Duration>,
+) -> (axum::Router, tempfile::TempDir) {
+    let tmp = tempfile::tempdir().unwrap();
+    let first = tmp.path().join("fastrag-first");
+    let second = tmp.path().join("fastrag-second");
+    write_bundle_with_id(&first, "fastrag-first");
+    write_bundle_with_id(&second, "fastrag-second");
+    let state = crate::http::TestAppState::from_bundle_with_bundles_dir(
+        &first,
+        tmp.path().to_path_buf(),
+        admin_token,
+        embedder,
+        reload_delay,
+    )
+    .unwrap();
+    let router = crate::http::build_router_for_test(state);
+    (router, tmp)
 }

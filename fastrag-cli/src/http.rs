@@ -60,8 +60,11 @@ struct AppState {
     /// `--token` never grants admin.
     admin_token: Option<Arc<String>>,
     /// Serializes concurrent `/admin/reload` calls.
-    #[allow(dead_code)] // consumed by Task 6 (/admin/reload)
     reload_lock: Arc<tokio::sync::Mutex<()>>,
+    /// Test-only hook. When `Some`, the `/admin/reload` handler sleeps for
+    /// this duration while holding `reload_lock` so concurrent-reload tests
+    /// can observe 409 contention deterministically. Always `None` in prod.
+    reload_delay: Option<std::time::Duration>,
 }
 
 /// Shared-secret auth state. `None` = auth disabled (the server logs a warning
@@ -770,6 +773,7 @@ pub async fn serve_http_with_registry_and_bundle(
         bundles_dir: bundle_cfg.bundles_dir,
         admin_token: bundle_cfg.admin_token.map(Arc::new),
         reload_lock: Arc::new(tokio::sync::Mutex::new(())),
+        reload_delay: None,
     };
 
     let app = build_router(app_state, auth_state);
@@ -818,14 +822,9 @@ fn build_router(app_state: AppState, auth_state: AuthState) -> Router {
         ));
 
     // /admin/* is gated by a SEPARATE token (never by --token). If no admin
-    // token is configured, every call returns 401. Real handlers land in
-    // Task 6; the stub returns 501 so a live admin_token proves the auth
-    // gate passed.
+    // token is configured, every call returns 401.
     let admin = Router::new()
-        .route(
-            "/admin/reload",
-            axum::routing::post(admin_reload_stub_handler),
-        )
+        .route("/admin/reload", axum::routing::post(admin_reload_handler))
         .route_layer(middleware::from_fn_with_state(
             app_state.clone(),
             admin_auth_middleware,
@@ -884,6 +883,54 @@ impl TestAppState {
             bundles_dir,
             admin_token: admin_token.map(Arc::new),
             reload_lock: Arc::new(tokio::sync::Mutex::new(())),
+            reload_delay: None,
+        }))
+    }
+
+    /// Like [`Self::from_bundle`] but loads `bundle_path` and configures
+    /// `bundles_dir` to `bundles_dir` (rather than the parent of
+    /// `bundle_path`). Used by the multi-bundle test helpers so
+    /// `/admin/reload` can resolve sibling bundle directory names.
+    pub fn from_bundle_with_bundles_dir(
+        bundle_path: &std::path::Path,
+        bundles_dir: std::path::PathBuf,
+        admin_token: Option<String>,
+        embedder: DynEmbedder,
+        reload_delay: Option<std::time::Duration>,
+    ) -> Result<Self, fastrag::bundle::BundleError> {
+        let state = fastrag::bundle::BundleState::load(bundle_path)?;
+        let bundle = Some(Arc::new(ArcSwap::from_pointee(state)));
+        let registry = fastrag::corpus::CorpusRegistry::new();
+
+        static TEST_METRICS: std::sync::OnceLock<PrometheusHandle> = std::sync::OnceLock::new();
+        let metrics = TEST_METRICS
+            .get_or_init(|| {
+                PrometheusBuilder::new()
+                    .install_recorder()
+                    .unwrap_or_else(|_| PrometheusBuilder::new().build_recorder().handle())
+            })
+            .clone();
+
+        Ok(Self(AppState {
+            registry,
+            embedder,
+            metrics,
+            dense_only: false,
+            cwe_expand_default: false,
+            batch_max_queries: 100,
+            tenant_field: None,
+            ingest_locks: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            ingest_max_body: 52_428_800,
+            similar_overfetch_cap: 10_000,
+            #[cfg(feature = "rerank")]
+            reranker: None,
+            #[cfg(feature = "rerank")]
+            rerank_over_fetch: 10,
+            bundle,
+            bundles_dir: Some(bundles_dir),
+            admin_token: admin_token.map(Arc::new),
+            reload_lock: Arc::new(tokio::sync::Mutex::new(())),
+            reload_delay,
         }))
     }
 
@@ -920,6 +967,7 @@ impl TestAppState {
             bundles_dir: None,
             admin_token: None,
             reload_lock: Arc::new(tokio::sync::Mutex::new(())),
+            reload_delay: None,
         })
     }
 }
@@ -965,12 +1013,129 @@ async fn admin_auth_middleware(
     }
 }
 
-async fn admin_reload_stub_handler() -> (StatusCode, Json<serde_json::Value>) {
-    // Real implementation lands in Task 6.
+#[derive(Deserialize)]
+struct AdminReloadRequest {
+    bundle_path: String,
+}
+
+async fn admin_reload_handler(
+    State(state): State<AppState>,
+    Json(req): Json<AdminReloadRequest>,
+) -> Response {
+    // Admin routes only make sense when a bundles-dir and a live bundle
+    // are both configured. Either missing → 503.
+    let Some(bundles_dir) = state.bundles_dir.as_ref() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({"error": "bundles_dir_not_configured"})),
+        )
+            .into_response();
+    };
+    let Some(bundle_arc) = state.bundle.as_ref() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({"error": "bundle_not_loaded"})),
+        )
+            .into_response();
+    };
+
+    // Syntactic path checks before touching disk. Empty, absolute, or any
+    // form of parent traversal → 400 path_escape.
+    if req.bundle_path.is_empty()
+        || std::path::Path::new(&req.bundle_path).is_absolute()
+        || req.bundle_path.split(['/', '\\']).any(|c| c == "..")
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "path_escape"})),
+        )
+            .into_response();
+    }
+    let candidate = bundles_dir.join(&req.bundle_path);
+    let canon = match candidate.canonicalize() {
+        Ok(p) => p,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "bundle_missing",
+                    "message": format!("no bundle at {}", candidate.display()),
+                })),
+            )
+                .into_response();
+        }
+    };
+    let canon_root = match bundles_dir.canonicalize() {
+        Ok(p) => p,
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "bundles_dir_invalid"})),
+            )
+                .into_response();
+        }
+    };
+    if !canon.starts_with(&canon_root) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "path_escape"})),
+        )
+            .into_response();
+    }
+
+    // Serialise reloads; second concurrent caller hits 409 and goes home.
+    let Ok(_guard) = state.reload_lock.try_lock() else {
+        metrics::counter!("fastrag_bundle_reloads_total", "result" => "conflict").increment(1);
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({"error": "reload_in_progress"})),
+        )
+            .into_response();
+    };
+
+    // Test hook: deterministic delay so concurrent-reload tests can observe
+    // mutex contention.
+    if let Some(d) = state.reload_delay {
+        tokio::time::sleep(d).await;
+    }
+
+    let new_state = match fastrag::bundle::BundleState::load(&canon) {
+        Ok(s) => s,
+        Err(e) => {
+            metrics::counter!("fastrag_bundle_reloads_total", "result" => "error").increment(1);
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "bundle_invalid",
+                    "message": e.to_string(),
+                })),
+            )
+                .into_response();
+        }
+    };
+    let new_id = new_state.manifest.bundle_id.clone();
+
+    let prev = bundle_arc.load_full();
+    let prev_id = prev.manifest.bundle_id.clone();
+    bundle_arc.store(std::sync::Arc::new(new_state));
+
+    metrics::counter!("fastrag_bundle_reloads_total", "result" => "ok").increment(1);
+    metrics::gauge!("fastrag_bundle_active_id", "bundle_id" => new_id.clone()).set(1.0);
+    info!(
+        bundle_id = %new_id,
+        previous_bundle_id = %prev_id,
+        "bundle reloaded"
+    );
+
     (
-        StatusCode::NOT_IMPLEMENTED,
-        Json(json!({"error": "not_implemented"})),
+        StatusCode::OK,
+        Json(json!({
+            "reloaded": true,
+            "bundle_id": new_id,
+            "previous_bundle_id": prev_id,
+        })),
     )
+        .into_response()
 }
 
 async fn get_cve_handler(
