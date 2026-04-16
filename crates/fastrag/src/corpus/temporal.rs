@@ -42,6 +42,37 @@ pub enum TemporalPolicy {
     FavorRecent(Strength),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TemporalIntent {
+    Historical,
+    Neutral,
+    RecencySeeking,
+}
+
+pub trait TemporalDetector: Send + Sync {
+    fn detect(&self, query: &str) -> TemporalPolicy;
+}
+
+pub struct OracleDetector {
+    intent: Option<TemporalIntent>,
+}
+
+impl OracleDetector {
+    pub fn new(intent: Option<TemporalIntent>) -> Self {
+        Self { intent }
+    }
+}
+
+impl TemporalDetector for OracleDetector {
+    fn detect(&self, _query: &str) -> TemporalPolicy {
+        match self.intent {
+            Some(TemporalIntent::RecencySeeking) => TemporalPolicy::FavorRecent(Strength::Medium),
+            _ => TemporalPolicy::Off,
+        }
+    }
+}
+
 #[cfg(test)]
 mod policy_serde_tests {
     use super::*;
@@ -119,5 +150,37 @@ mod strength_tests {
             Duration::from_secs(60 * 86_400)
         );
         assert!((Strength::Strong.weight_floor() - 0.45).abs() < 1e-6);
+    }
+}
+
+#[cfg(test)]
+mod oracle_tests {
+    use super::*;
+
+    #[test]
+    fn recency_seeking_routes_to_medium_favor_recent() {
+        let d = OracleDetector::new(Some(TemporalIntent::RecencySeeking));
+        match d.detect("any query text") {
+            TemporalPolicy::FavorRecent(Strength::Medium) => {}
+            other => panic!("expected FavorRecent(Medium), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn neutral_routes_to_off() {
+        let d = OracleDetector::new(Some(TemporalIntent::Neutral));
+        assert_eq!(d.detect("any query"), TemporalPolicy::Off);
+    }
+
+    #[test]
+    fn historical_routes_to_off() {
+        let d = OracleDetector::new(Some(TemporalIntent::Historical));
+        assert_eq!(d.detect("any query"), TemporalPolicy::Off);
+    }
+
+    #[test]
+    fn missing_intent_routes_to_off() {
+        let d = OracleDetector::new(None);
+        assert_eq!(d.detect("any query"), TemporalPolicy::Off);
     }
 }
