@@ -833,6 +833,7 @@ fn build_router(app_state: AppState, auth_state: AuthState) -> Router {
 
     Router::new()
         .route("/health", get(health))
+        .route("/ready", get(ready_handler))
         .merge(protected)
         .merge(admin)
         .with_state(app_state)
@@ -885,10 +886,59 @@ impl TestAppState {
             reload_lock: Arc::new(tokio::sync::Mutex::new(())),
         }))
     }
+
+    /// Bundle-less variant: simulates a server started with only `--corpus`.
+    /// Bundle-only routes must return 503 when reached in this mode.
+    pub fn without_bundle(embedder: DynEmbedder) -> Self {
+        let registry = fastrag::corpus::CorpusRegistry::new();
+
+        static TEST_METRICS: std::sync::OnceLock<PrometheusHandle> = std::sync::OnceLock::new();
+        let metrics = TEST_METRICS
+            .get_or_init(|| {
+                PrometheusBuilder::new()
+                    .install_recorder()
+                    .unwrap_or_else(|_| PrometheusBuilder::new().build_recorder().handle())
+            })
+            .clone();
+
+        Self(AppState {
+            registry,
+            embedder,
+            metrics,
+            dense_only: false,
+            cwe_expand_default: false,
+            batch_max_queries: 100,
+            tenant_field: None,
+            ingest_locks: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            ingest_max_body: 52_428_800,
+            similar_overfetch_cap: 10_000,
+            #[cfg(feature = "rerank")]
+            reranker: None,
+            #[cfg(feature = "rerank")]
+            rerank_over_fetch: 10,
+            bundle: None,
+            bundles_dir: None,
+            admin_token: None,
+            reload_lock: Arc::new(tokio::sync::Mutex::new(())),
+        })
+    }
 }
 
 pub fn build_router_for_test(app_state_internal: TestAppState) -> Router {
     let auth_state = AuthState { token: None };
+    build_router(app_state_internal.0, auth_state)
+}
+
+/// Test-only router builder that wires a read-path auth token. Used to
+/// verify that probe routes (`/health`, `/ready`) stay unauthenticated
+/// while protected routes require the token.
+pub fn build_router_for_test_with_token(
+    app_state_internal: TestAppState,
+    read_token: Option<String>,
+) -> Router {
+    let auth_state = AuthState {
+        token: read_token.map(Arc::new),
+    };
     build_router(app_state_internal.0, auth_state)
 }
 
@@ -1375,6 +1425,53 @@ async fn delete_handler(
 
 async fn health() -> impl IntoResponse {
     Json(json!({ "status": "ok" }))
+}
+
+/// Readiness probe. Distinct from `/health` (always 200): `/ready` returns
+/// 503 until the bundle is loaded, every required corpus is present, and
+/// the embedder + reranker (if configured) report ready. Reason codes let
+/// the liveness proxy surface the exact missing dependency.
+async fn ready_handler(State(state): State<AppState>) -> Response {
+    let mut reasons: Vec<&'static str> = Vec::new();
+
+    let Some(bundle) = state.bundle.as_ref() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({"ready": false, "reasons": ["bundle_not_loaded"]})),
+        )
+            .into_response();
+    };
+    let guard = bundle.load_full();
+    for name in ["cve", "cwe", "kev"] {
+        if !guard.corpora.contains_key(name) {
+            match name {
+                "cve" => reasons.push("corpus_cve_missing"),
+                "cwe" => reasons.push("corpus_cwe_missing"),
+                "kev" => reasons.push("corpus_kev_missing"),
+                _ => {}
+            }
+        }
+    }
+
+    if !state.embedder.is_ready() {
+        reasons.push("embedder_unreachable");
+    }
+    #[cfg(feature = "rerank")]
+    if let Some(r) = state.reranker.as_ref()
+        && !r.is_ready()
+    {
+        reasons.push("reranker_unreachable");
+    }
+
+    if reasons.is_empty() {
+        (StatusCode::OK, Json(json!({"ready": true}))).into_response()
+    } else {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({"ready": false, "reasons": reasons})),
+        )
+            .into_response()
+    }
 }
 
 async fn metrics_handler(State(state): State<AppState>) -> impl IntoResponse {

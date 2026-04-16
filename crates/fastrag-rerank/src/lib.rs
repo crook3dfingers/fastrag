@@ -35,6 +35,13 @@ pub trait Reranker: Send + Sync {
     /// Score each hit against the query and return hits sorted by descending score.
     /// The implementation overwrites `hit.score` with the cross-encoder score.
     fn rerank(&self, query: &str, hits: Vec<RerankHit>) -> Result<Vec<RerankHit>, RerankError>;
+
+    /// Liveness probe for `/ready`. In-process rerankers are always ready
+    /// once constructed; HTTP-backed ones can override to check the remote
+    /// peer. Must be cheap — `/ready` is polled frequently.
+    fn is_ready(&self) -> bool {
+        true
+    }
 }
 
 #[cfg(any(feature = "test-utils", test))]

@@ -145,6 +145,13 @@ pub trait DynEmbedderTrait: Send + Sync + 'static {
     fn default_batch_size(&self) -> usize;
     fn embed_query_dyn(&self, texts: &[QueryText]) -> Result<Vec<Vec<f32>>, EmbedError>;
     fn embed_passage_dyn(&self, texts: &[PassageText]) -> Result<Vec<Vec<f32>>, EmbedError>;
+
+    /// Liveness probe for `/ready`. In-process embedders are always ready
+    /// once constructed; HTTP-backed embedders can override to check the
+    /// remote peer. Must be cheap — `/ready` is polled frequently.
+    fn is_ready(&self) -> bool {
+        true
+    }
 }
 
 impl<E: Embedder> DynEmbedderTrait for E {
