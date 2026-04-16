@@ -145,18 +145,29 @@ impl Default for AbstainingRegexDetector {
 
 impl TemporalDetector for AbstainingRegexDetector {
     fn detect(&self, query: &str) -> TemporalPolicy {
+        // Mask CVE-YYYY-NNNN identifiers before applying the year pattern so
+        // that bare identifiers like `CVE-2026-0001` do not trip the detector.
+        // The other patterns are intentionally run on the raw query.
+        let masked = mask_cve_identifiers(query);
         let fires = keyword_re().is_match(query)
             || recent_plus_noun_re().is_match(query)
             || still_re().is_match(query)
             || as_of_re().is_match(query)
             || this_week_month_re().is_match(query)
-            || year_2026_plus_noun_re().is_match(query);
+            || year_2026_plus_noun_re().is_match(&masked);
         if fires {
             TemporalPolicy::FavorRecent(Strength::Medium)
         } else {
             TemporalPolicy::Off
         }
     }
+}
+
+fn mask_cve_identifiers(query: &str) -> String {
+    static R: OnceLock<Regex> = OnceLock::new();
+    R.get_or_init(|| Regex::new(r"(?i)\bCVE-\d{4}-\d{4,}\b").unwrap())
+        .replace_all(query, "___")
+        .into_owned()
 }
 
 #[cfg(test)]
@@ -291,6 +302,59 @@ mod regex_positive_tests {
         assert!(fires("2026 CVE for libsqlite"));
         assert!(fires("2026 advisory NVD"));
         assert!(fires("2026 mitigation guidance"));
+    }
+}
+
+#[cfg(test)]
+mod regex_negative_tests {
+    use super::*;
+
+    fn abstains(query: &str) -> bool {
+        matches!(
+            AbstainingRegexDetector::new().detect(query),
+            TemporalPolicy::Off
+        )
+    }
+
+    #[test]
+    fn historical_queries_abstain() {
+        assert!(abstains("describe CVE-2014-0160"));
+        assert!(abstains("as of 2014 how did Shellshock work"));
+        assert!(abstains("in 2021 what was Log4Shell"));
+        assert!(abstains("back in 2017 the WannaCry worm"));
+    }
+
+    #[test]
+    fn neutral_queries_abstain() {
+        assert!(abstains("explain Kerberoasting"));
+        assert!(abstains("what is NTLM relay"));
+        assert!(abstains("how does ASLR work"));
+    }
+
+    #[test]
+    fn bare_cve_identifier_abstains() {
+        assert!(abstains("CVE-2026-0001"));
+        assert!(abstains("CVE-2014-6271"));
+    }
+
+    #[test]
+    fn bare_2026_abstains_without_noun() {
+        assert!(abstains("port 2026 scan"));
+        assert!(abstains("version 2026"));
+        assert!(abstains("2026"));
+    }
+
+    #[test]
+    fn false_friends_abstain() {
+        // `current` without a security noun within 6 tokens
+        assert!(abstains("current user guide"));
+        assert!(abstains("current working directory"));
+        // `latest` unrelated to freshness / security
+        assert!(abstains("latest attempt to install X"));
+        assert!(abstains("what is the latest episode about"));
+        // bare `recent` / `recently` without a following security noun
+        assert!(abstains("recently I was thinking"));
+        assert!(abstains("a recent commit"));
     }
 }
 
