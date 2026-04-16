@@ -111,16 +111,16 @@ fn run_matrix_executes_all_five_variants_in_order() {
     assert_eq!(report.runs[1].variant, ConfigVariant::NoRerank);
     assert_eq!(report.runs[2].variant, ConfigVariant::NoContextual);
     assert_eq!(report.runs[3].variant, ConfigVariant::DenseOnly);
-    assert_eq!(report.runs[4].variant, ConfigVariant::TemporalOn);
+    assert_eq!(report.runs[4].variant, ConfigVariant::TemporalAuto);
 }
 
 #[test]
-fn run_matrix_temporal_on_runs_without_errors() {
+fn run_matrix_temporal_auto_runs_without_errors() {
     let gs = single_entry_gold_set();
-    let report = run_matrix(&StubDriver, &gs, 5, Some(&[ConfigVariant::TemporalOn]))
+    let report = run_matrix(&StubDriver, &gs, 5, Some(&[ConfigVariant::TemporalAuto]))
         .expect("run_matrix should succeed");
     assert_eq!(report.runs.len(), 1);
-    assert_eq!(report.runs[0].variant, ConfigVariant::TemporalOn);
+    assert_eq!(report.runs[0].variant, ConfigVariant::TemporalAuto);
 }
 
 #[test]

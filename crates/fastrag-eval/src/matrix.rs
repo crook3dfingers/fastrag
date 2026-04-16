@@ -26,8 +26,8 @@ pub enum ConfigVariant {
     NoContextual,
     /// Dense-only retrieval (HNSW) + reranker, no BM25 fusion.
     DenseOnly,
-    /// Full stack + temporal decay applied post-fusion.
-    TemporalOn,
+    /// Full stack + query-conditional temporal decay applied post-rerank (late injection).
+    TemporalAuto,
 }
 
 impl ConfigVariant {
@@ -38,7 +38,7 @@ impl ConfigVariant {
             ConfigVariant::NoRerank,
             ConfigVariant::NoContextual,
             ConfigVariant::DenseOnly,
-            ConfigVariant::TemporalOn,
+            ConfigVariant::TemporalAuto,
         ]
     }
 
@@ -49,7 +49,7 @@ impl ConfigVariant {
             "no_rerank" => Some(ConfigVariant::NoRerank),
             "no_contextual" => Some(ConfigVariant::NoContextual),
             "dense_only" => Some(ConfigVariant::DenseOnly),
-            "temporal_on" => Some(ConfigVariant::TemporalOn),
+            "temporal_auto" => Some(ConfigVariant::TemporalAuto),
             _ => None,
         }
     }
@@ -61,7 +61,7 @@ impl ConfigVariant {
             ConfigVariant::NoRerank => "no_rerank",
             ConfigVariant::NoContextual => "no_contextual",
             ConfigVariant::DenseOnly => "dense_only",
-            ConfigVariant::TemporalOn => "temporal_on",
+            ConfigVariant::TemporalAuto => "temporal_auto",
         }
     }
 }
@@ -358,21 +358,34 @@ mod tests {
     use super::*;
 
     #[test]
-    fn config_variant_all_returns_five_in_order() {
+    fn all_variants_ordered() {
         let all = ConfigVariant::all();
         assert_eq!(all.len(), 5);
         assert_eq!(all[0], ConfigVariant::Primary);
+        assert_eq!(all[1], ConfigVariant::NoRerank);
+        assert_eq!(all[2], ConfigVariant::NoContextual);
         assert_eq!(all[3], ConfigVariant::DenseOnly);
-        assert_eq!(all[4], ConfigVariant::TemporalOn);
+        assert_eq!(all[4], ConfigVariant::TemporalAuto);
     }
 
     #[test]
-    fn config_variant_labels_are_stable() {
+    fn labels_stable() {
         assert_eq!(ConfigVariant::Primary.label(), "primary");
         assert_eq!(ConfigVariant::NoRerank.label(), "no_rerank");
         assert_eq!(ConfigVariant::NoContextual.label(), "no_contextual");
         assert_eq!(ConfigVariant::DenseOnly.label(), "dense_only");
-        assert_eq!(ConfigVariant::TemporalOn.label(), "temporal_on");
+        assert_eq!(ConfigVariant::TemporalAuto.label(), "temporal_auto");
+    }
+
+    #[test]
+    fn temporal_on_label_is_rejected_after_retirement() {
+        // Old baselines used "temporal_on". Decision: reject with None,
+        // forcing baseline recapture (Task 15). Matching "temporal_auto" works.
+        assert_eq!(ConfigVariant::from_label("temporal_on"), None);
+        assert_eq!(
+            ConfigVariant::from_label("temporal_auto"),
+            Some(ConfigVariant::TemporalAuto)
+        );
     }
 
     #[test]
