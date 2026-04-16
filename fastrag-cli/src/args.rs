@@ -60,6 +60,39 @@ pub enum TimeDecayBlendArg {
     Additive,
 }
 
+/// Per-query temporal policy exposed as a CLI value enum.
+#[cfg(feature = "retrieval")]
+#[derive(Debug, Clone, Copy, clap::ValueEnum, PartialEq, Eq, Default)]
+#[value(rename_all = "kebab-case")]
+pub enum TemporalPolicyCli {
+    /// Route through the abstaining recency detector (default). Neutral and
+    /// historical queries receive no decay.
+    #[default]
+    Auto,
+    /// Disable temporal decay entirely for this query.
+    Off,
+    /// Apply mild recency bias (halflife ≈ 365d).
+    FavorRecentLight,
+    /// Apply moderate recency bias (halflife ≈ 180d).
+    FavorRecentMedium,
+    /// Apply strong recency bias (halflife ≈ 60d).
+    FavorRecentStrong,
+}
+
+#[cfg(feature = "retrieval")]
+impl From<TemporalPolicyCli> for fastrag::corpus::temporal::TemporalPolicy {
+    fn from(c: TemporalPolicyCli) -> Self {
+        use fastrag::corpus::temporal::{Strength, TemporalPolicy};
+        match c {
+            TemporalPolicyCli::Auto => TemporalPolicy::Auto,
+            TemporalPolicyCli::Off => TemporalPolicy::Off,
+            TemporalPolicyCli::FavorRecentLight => TemporalPolicy::FavorRecent(Strength::Light),
+            TemporalPolicyCli::FavorRecentMedium => TemporalPolicy::FavorRecent(Strength::Medium),
+            TemporalPolicyCli::FavorRecentStrong => TemporalPolicy::FavorRecent(Strength::Strong),
+        }
+    }
+}
+
 #[cfg(feature = "retrieval")]
 #[allow(clippy::too_many_arguments)]
 pub fn build_hybrid_opts(
@@ -421,6 +454,15 @@ pub enum Command {
         /// Blend mode: multiplicative (default) or additive.
         #[arg(long, value_enum, default_value = "multiplicative")]
         time_decay_blend: TimeDecayBlendArg,
+
+        /// Per-query temporal policy: auto (default), off, favor-recent-light,
+        /// favor-recent-medium, favor-recent-strong.
+        ///
+        /// `auto` routes through the abstaining recency detector — neutral and
+        /// historical queries receive no decay. Explicit `favor-recent-*` values
+        /// override the detector for this query. Requires `--time-decay-field`.
+        #[arg(long, value_enum, default_value = "auto")]
+        temporal_policy: TemporalPolicyCli,
 
         /// Reranker backend (default: onnx). Reranking is on by default.
         #[cfg(feature = "rerank")]

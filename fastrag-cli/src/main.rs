@@ -512,6 +512,7 @@ async fn main() {
             time_decay_weight,
             time_decay_dateless_prior,
             time_decay_blend,
+            temporal_policy,
             cwe_expand,
             no_cwe_expand,
             #[cfg(feature = "rerank")]
@@ -560,6 +561,48 @@ async fn main() {
                         .and_then(|m| m.cwe_field)
                         .is_some()
                 };
+                // Emit deprecation warning when caller passes legacy fine-grained
+                // time-decay flags but leaves --temporal-policy at its default
+                // (auto). These flags are no longer consulted by the new policy
+                // path; --temporal-policy=favor-recent-{light|medium|strong}
+                // should be used instead.
+                let legacy_flags_set = time_decay_halflife != "30d"
+                    || (time_decay_weight - 0.3f32).abs() > 1e-6
+                    || (time_decay_dateless_prior - 0.5f32).abs() > 1e-6
+                    || !matches!(
+                        time_decay_blend,
+                        fastrag_cli::args::TimeDecayBlendArg::Multiplicative
+                    );
+                if legacy_flags_set && temporal_policy == fastrag_cli::args::TemporalPolicyCli::Auto
+                {
+                    eprintln!(
+                        "warning: --time-decay-halflife/--time-decay-weight/\
+                         --time-decay-blend/--time-decay-dateless-prior are deprecated \
+                         and ignored when --temporal-policy=auto (default). Use \
+                         --temporal-policy=favor-recent-{{light|medium|strong}} instead."
+                    );
+                }
+
+                // Derive date_fields from --time-decay-field (comma-separated).
+                let date_fields: Vec<String> = time_decay_field
+                    .as_deref()
+                    .map(|s| s.split(',').map(|f| f.trim().to_string()).collect())
+                    .unwrap_or_default();
+
+                // --time-decay-field (legacy) without explicit --temporal-policy
+                // bridges to FavorRecent(Medium) for backward compat (same as
+                // the HTTP handler in Task 10).
+                let effective_policy: fastrag::corpus::temporal::TemporalPolicy = if temporal_policy
+                    == fastrag_cli::args::TemporalPolicyCli::Auto
+                    && time_decay_field.is_some()
+                {
+                    fastrag::corpus::temporal::TemporalPolicy::FavorRecent(
+                        fastrag::corpus::temporal::Strength::Medium,
+                    )
+                } else {
+                    temporal_policy.into()
+                };
+
                 let hybrid_opts = fastrag_cli::args::build_hybrid_opts(
                     hybrid,
                     rrf_k,
@@ -577,7 +620,8 @@ async fn main() {
                 let query_opts = ops::QueryOpts {
                     cwe_expand: cwe_expand_effective,
                     hybrid: hybrid_opts,
-                    ..Default::default()
+                    temporal_policy: effective_policy,
+                    date_fields,
                 };
 
                 #[cfg(feature = "rerank")]
