@@ -22,6 +22,43 @@ pub async fn build_router_with_bundle(
     (router, tmp)
 }
 
+/// Same as [`build_router_with_bundle`] but seeds the taxonomy with the DAG
+/// `89 -> [707, 943] -> [20]` used by the `/cwe/relation` tests.
+pub async fn build_router_with_bundle_dag(
+    embedder: DynEmbedder,
+) -> (axum::Router, tempfile::TempDir) {
+    let tmp = tempfile::tempdir().unwrap();
+    write_minimal_bundle(tmp.path());
+    // CWE taxonomy semantics: `parents[x]` is the list of more-abstract CWEs
+    // directly above `x`; `closure[x]` enumerates `x` plus all transitively
+    // reachable descendants (more specific CWEs below). DAG shape used here:
+    //   20 -> {707, 943} -> {89}   (20 is most abstract, 89 most specific)
+    std::fs::write(
+        tmp.path().join("taxonomy/cwe-taxonomy.json"),
+        r#"{
+            "schema_version": 2,
+            "version": "4.15",
+            "view": "1000",
+            "closure": {
+                "20":  [20, 707, 943, 89],
+                "707": [707, 89],
+                "943": [943, 89],
+                "89":  [89]
+            },
+            "parents": {
+                "89":  [707, 943],
+                "707": [20],
+                "943": [20],
+                "20":  []
+            }
+        }"#,
+    )
+    .unwrap();
+    let state = crate::http::TestAppState::from_bundle(tmp.path(), None, embedder).unwrap();
+    let router = crate::http::build_router_for_test(state);
+    (router, tmp)
+}
+
 fn write_minimal_bundle(root: &Path) {
     std::fs::write(
         root.join("bundle.json"),

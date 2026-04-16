@@ -220,6 +220,53 @@ impl TantivyStore {
 
     // ── query helpers ────────────────────────────────────────────────────────
 
+    /// Find a single `_id` whose user field `field` equals the text value
+    /// `value`. Supports [`TypedKind::String`] (non-tokenized exact match)
+    /// and [`TypedKind::Numeric`]/[`TypedKind::Bool`] (via numeric parse).
+    /// Returns `Ok(None)` if the field does not exist or the value has no
+    /// match.
+    ///
+    /// Field types beyond those above (`Date`, `Array`, tokenized `String`
+    /// with `positions=true`) are rejected with [`StoreError::Corrupt`] to
+    /// avoid silently returning wrong answers.
+    pub fn find_by_user_field(&self, field: &str, value: &str) -> StoreResult<Option<u64>> {
+        let Some(handle) = self.user_field(field) else {
+            return Ok(None);
+        };
+        let term = match handle.typed {
+            TypedKind::String => Term::from_field_text(handle.field, value),
+            TypedKind::Numeric => {
+                let Ok(n) = value.parse::<f64>() else {
+                    return Ok(None);
+                };
+                Term::from_field_f64(handle.field, n)
+            }
+            TypedKind::Bool => {
+                let n: u64 = match value {
+                    "true" | "1" => 1,
+                    "false" | "0" => 0,
+                    _ => return Ok(None),
+                };
+                Term::from_field_u64(handle.field, n)
+            }
+            TypedKind::Date | TypedKind::Array => {
+                return Err(StoreError::Corrupt(format!(
+                    "find_by_user_field does not support field type for {field}"
+                )));
+            }
+        };
+        let query = TermQuery::new(term, IndexRecordOption::Basic);
+        let searcher = self.reader.searcher();
+        let top = searcher.search(&query, &TopDocs::with_limit(1))?;
+        for (_score, addr) in top {
+            let doc: TantivyDocument = searcher.doc(addr)?;
+            if let Some(id_val) = doc.get_first(self.core.id).and_then(|v| v.as_u64()) {
+                return Ok(Some(id_val));
+            }
+        }
+        Ok(None)
+    }
+
     /// Fetch documents by their `_id` values.
     pub fn fetch_by_ids(&self, ids: &[u64]) -> StoreResult<Vec<TantivyDocument>> {
         if ids.is_empty() {

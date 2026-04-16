@@ -323,6 +323,19 @@ impl Store {
         self.tantivy.bm25_search(query_text, top_k)
     }
 
+    /// Find the single top `SearchHit` where user field `field` equals `value`.
+    ///
+    /// Returns `Ok(None)` when the field is absent from the schema, the value
+    /// does not match any document, or the value cannot be parsed for the
+    /// field's typed kind (e.g. non-numeric string against a Numeric field).
+    pub fn find_by_field_eq(&self, field: &str, value: &str) -> StoreResult<Option<SearchHit>> {
+        let Some(id) = self.tantivy.find_by_user_field(field, value)? else {
+            return Ok(None);
+        };
+        let hits = self.fetch_hits(&[(id, 1.0)])?;
+        Ok(hits.into_iter().next())
+    }
+
     /// Fetch and group Tantivy docs by external_id, building SearchHit structs.
     pub fn fetch_hits(&self, scored_ids: &[(u64, f32)]) -> StoreResult<Vec<SearchHit>> {
         if scored_ids.is_empty() {

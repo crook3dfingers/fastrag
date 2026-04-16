@@ -805,6 +805,9 @@ fn build_router(app_state: AppState, auth_state: AuthState) -> Router {
             "/similar",
             axum::routing::post(similar_handler).layer(DefaultBodyLimit::max(1024 * 1024)),
         )
+        .route("/cve/:id", get(get_cve_handler))
+        .route("/cwe/relation", get(cwe_relation_handler))
+        .route("/cwe/:id", get(get_cwe_handler))
         .route_layer(middleware::from_fn_with_state(
             app_state.clone(),
             tenant_middleware,
@@ -918,6 +921,181 @@ async fn admin_reload_stub_handler() -> (StatusCode, Json<serde_json::Value>) {
         StatusCode::NOT_IMPLEMENTED,
         Json(json!({"error": "not_implemented"})),
     )
+}
+
+async fn get_cve_handler(
+    State(state): State<AppState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    if !params.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": "unexpected_query_params",
+                "message": "/cve/{id} is a direct lookup; query params not allowed"
+            })),
+        )
+            .into_response();
+    }
+    let Some(bundle) = state.bundle.as_ref() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({"error": "bundle_not_loaded"})),
+        )
+            .into_response();
+    };
+    let guard = bundle.load_full();
+    let Some(corpus) = guard.corpora.get("cve") else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({"error": "corpus_cve_missing"})),
+        )
+            .into_response();
+    };
+
+    match fastrag::corpus::lookup_by_field(corpus.dir(), "cve_id", &id) {
+        Ok(hits) if !hits.is_empty() => {
+            (StatusCode::OK, Json(json!({"hits": hits}))).into_response()
+        }
+        Ok(_) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "cve_not_found", "id": id})),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "lookup_failed", "message": e.to_string()})),
+        )
+            .into_response(),
+    }
+}
+
+async fn get_cwe_handler(
+    State(state): State<AppState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Response {
+    let numeric = id.strip_prefix("CWE-").unwrap_or(&id);
+    let cwe_id: u32 = match numeric.parse() {
+        Ok(n) => n,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "invalid_cwe_id",
+                    "message": "cwe id must be integer or CWE-<integer>"
+                })),
+            )
+                .into_response();
+        }
+    };
+    let Some(bundle) = state.bundle.as_ref() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({"error": "bundle_not_loaded"})),
+        )
+            .into_response();
+    };
+    let guard = bundle.load_full();
+    let Some(corpus) = guard.corpora.get("cwe") else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({"error": "corpus_cwe_missing"})),
+        )
+            .into_response();
+    };
+
+    match fastrag::corpus::lookup_by_field(corpus.dir(), "cwe_id", &cwe_id.to_string()) {
+        Ok(hits) if !hits.is_empty() => {
+            (StatusCode::OK, Json(json!({"hits": hits}))).into_response()
+        }
+        Ok(_) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "cwe_not_found", "id": cwe_id})),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "lookup_failed", "message": e.to_string()})),
+        )
+            .into_response(),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct CweRelationParams {
+    cwe_id: Option<String>,
+    #[serde(default)]
+    direction: Option<String>,
+    #[serde(default)]
+    max_depth: Option<usize>,
+}
+
+async fn cwe_relation_handler(
+    State(state): State<AppState>,
+    axum::extract::Query(params): axum::extract::Query<CweRelationParams>,
+) -> Response {
+    let Some(raw) = params.cwe_id else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "missing_cwe_id"})),
+        )
+            .into_response();
+    };
+    let raw_trim = raw.strip_prefix("CWE-").unwrap_or(&raw);
+    let cwe: u32 = match raw_trim.parse() {
+        Ok(n) => n,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "invalid_cwe_id"})),
+            )
+                .into_response();
+        }
+    };
+    let dir = params.direction.as_deref().unwrap_or("both");
+    if !matches!(dir, "ancestors" | "descendants" | "both") {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "invalid_direction"})),
+        )
+            .into_response();
+    }
+    let Some(bundle) = state.bundle.as_ref() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({"error": "bundle_not_loaded"})),
+        )
+            .into_response();
+    };
+    let guard = bundle.load_full();
+    let tax = guard.taxonomy.as_ref();
+
+    let ancestors: Vec<u32> = if matches!(dir, "ancestors" | "both") {
+        match params.max_depth {
+            Some(d) => tax.ancestors_bounded(cwe, d),
+            None => tax.ancestors(cwe),
+        }
+    } else {
+        Vec::new()
+    };
+    let descendants: Vec<u32> = if matches!(dir, "descendants" | "both") {
+        let mut d = tax.expand(cwe);
+        d.retain(|&x| x != cwe);
+        d
+    } else {
+        Vec::new()
+    };
+
+    (
+        StatusCode::OK,
+        Json(json!({
+            "cwe_id": cwe,
+            "ancestors": ancestors,
+            "descendants": descendants,
+        })),
+    )
+        .into_response()
 }
 
 #[derive(Debug, Deserialize)]

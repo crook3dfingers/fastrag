@@ -1617,6 +1617,28 @@ pub(crate) fn scored_ids_to_dtos(
     Ok(dtos)
 }
 
+/// Look up a single corpus entry by exact equality on a user field.
+///
+/// Returns `Ok(None)` when the corpus has no `schema.json` (legacy HNSW-only
+/// layouts have no Tantivy index) or when no document matches. `Ok(Some(_))`
+/// carries a single `SearchHitDto` per chunk of the matched entry.
+#[cfg(feature = "retrieval")]
+pub fn lookup_by_field(
+    corpus_dir: &Path,
+    field: &str,
+    value: &str,
+) -> Result<Vec<SearchHitDto>, CorpusError> {
+    if !corpus_dir.join("schema.json").exists() {
+        return Ok(vec![]);
+    }
+    let store = fastrag_store::Store::open_no_embedder(corpus_dir)?;
+    let Some(hit) = store.find_by_field_eq(field, value)? else {
+        return Ok(vec![]);
+    };
+    let scored: Vec<(u64, f32)> = hit.chunks.iter().map(|c| (c.id, c.score)).collect();
+    scored_ids_to_dtos(&store, &scored, None, 0)
+}
+
 fn sidecar_path_for(path: &Path) -> PathBuf {
     let mut p = path.to_path_buf();
     let new_name = match path.file_name().and_then(|n| n.to_str()) {
