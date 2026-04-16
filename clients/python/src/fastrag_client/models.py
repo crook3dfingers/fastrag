@@ -53,3 +53,45 @@ class CorpusInfo(BaseModel):
     name: str
     path: str
     status: str
+
+
+class SimilarHit(BaseModel):
+    """Single hit returned by POST /similar (threshold-based near-duplicate)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str = ""
+    score: float
+    text: str = ""
+    chunk_text: str = ""
+    source_path: str = ""
+    metadata: dict[str, Any] = {}
+
+
+class CweRelation(BaseModel):
+    """Response body for GET /cwe/relation."""
+
+    model_config = ConfigDict(extra="allow")
+
+    cwe_id: int
+    ancestors: list[int] = []
+    descendants: list[int] = []
+
+
+class ReadyStatus(BaseModel):
+    """Normalised view of GET /ready (unified shape for 200 and 503)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    ok: bool
+    reasons: list[str] = []
+
+
+class ReloadResult(BaseModel):
+    """Response body for POST /admin/reload."""
+
+    model_config = ConfigDict(extra="allow")
+
+    reloaded: bool
+    bundle_id: str
+    previous_bundle_id: str | None = None

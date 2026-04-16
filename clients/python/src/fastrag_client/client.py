@@ -9,6 +9,7 @@ import httpx
 
 from .errors import (
     AuthenticationError,
+    ConflictError,
     FastRAGError,
     NotFoundError,
     PayloadTooLargeError,
@@ -16,12 +17,23 @@ from .errors import (
     ValidationError,
 )
 from .filters import FilterExpr
-from .models import BatchResult, CorpusInfo, DeleteResult, IngestResult, SearchHit
+from .models import (
+    BatchResult,
+    CorpusInfo,
+    CweRelation,
+    DeleteResult,
+    IngestResult,
+    ReadyStatus,
+    ReloadResult,
+    SearchHit,
+    SimilarHit,
+)
 
 _STATUS_MAP: dict[int, type[FastRAGError]] = {
     400: ValidationError,
     401: AuthenticationError,
     404: NotFoundError,
+    409: ConflictError,
     413: PayloadTooLargeError,
     500: ServerError,
     503: ServerError,
@@ -58,10 +70,12 @@ class FastRAGClient:
         base_url: str,
         *,
         token: str | None = None,
+        admin_token: str | None = None,
         tenant_id: str | None = None,
         timeout: float = 30.0,
     ) -> None:
         self._base_url = base_url.rstrip("/")
+        self._admin_token = admin_token
         self._client = httpx.Client(
             base_url=self._base_url,
             headers=_build_headers(token, tenant_id),
@@ -168,6 +182,106 @@ class FastRAGClient:
         resp = self._client.get("/corpora")
         _raise_for_status(resp)
         return [CorpusInfo.model_validate(c) for c in resp.json()["corpora"]]
+
+    def get_cve(self, cve_id: str) -> SearchHit | None:
+        resp = self._client.get(f"/cve/{cve_id}")
+        if resp.status_code == 404:
+            return None
+        _raise_for_status(resp)
+        hits = resp.json().get("hits", [])
+        if not hits:
+            return None
+        return SearchHit.model_validate(hits[0])
+
+    def get_cwe(self, cwe_id: int | str) -> SearchHit | None:
+        segment = str(cwe_id)
+        resp = self._client.get(f"/cwe/{segment}")
+        if resp.status_code == 404:
+            return None
+        _raise_for_status(resp)
+        hits = resp.json().get("hits", [])
+        if not hits:
+            return None
+        return SearchHit.model_validate(hits[0])
+
+    def cwe_relation(
+        self,
+        cwe_id: int | str,
+        *,
+        direction: str = "both",
+        max_depth: int | None = None,
+    ) -> CweRelation:
+        if isinstance(cwe_id, str):
+            stripped = cwe_id.removeprefix("CWE-")
+            cwe_id = int(stripped)
+        params: dict[str, str] = {"cwe_id": str(cwe_id), "direction": direction}
+        if max_depth is not None:
+            params["max_depth"] = str(max_depth)
+        resp = self._client.get("/cwe/relation", params=params)
+        _raise_for_status(resp)
+        return CweRelation.model_validate(resp.json())
+
+    def ready(self) -> ReadyStatus:
+        resp = self._client.get("/ready")
+        if resp.status_code in (200, 503):
+            body = resp.json()
+            return ReadyStatus(
+                ok=bool(body.get("ready")),
+                reasons=list(body.get("reasons", [])),
+            )
+        _raise_for_status(resp)
+        return ReadyStatus(ok=False, reasons=["unknown_status"])
+
+    def reload_bundle(
+        self,
+        bundle_path: str,
+        *,
+        admin_token: str | None = None,
+    ) -> ReloadResult:
+        headers: dict[str, str] = {}
+        token = admin_token or self._admin_token
+        if token:
+            headers["x-fastrag-admin-token"] = token
+        resp = self._client.post(
+            "/admin/reload",
+            json={"bundle_path": bundle_path},
+            headers=headers,
+        )
+        _raise_for_status(resp)
+        return ReloadResult.model_validate(resp.json())
+
+    def similar(
+        self,
+        text: str,
+        threshold: float,
+        *,
+        max_results: int = 10,
+        corpus: str | None = None,
+        corpora: list[str] | None = None,
+        filter: dict[str, Any] | str | None = None,
+        fields: list[str] | None = None,
+        verify: dict[str, Any] | None = None,
+    ) -> list[SimilarHit]:
+        body: dict[str, Any] = {
+            "text": text,
+            "threshold": threshold,
+            "max_results": max_results,
+        }
+        if corpus is not None:
+            body["corpus"] = corpus
+        if corpora is not None:
+            body["corpora"] = corpora
+        if filter is not None:
+            body["filter"] = filter
+        if fields is not None:
+            body["fields"] = ",".join(fields)
+        if verify is not None:
+            body["verify"] = verify
+        resp = self._client.post("/similar", json=body)
+        _raise_for_status(resp)
+        data = resp.json()
+        hits = data.get("hits", []) if isinstance(data, dict) else data
+        return [SimilarHit.model_validate(h) for h in hits]
 
     def health(self) -> bool:
         try:

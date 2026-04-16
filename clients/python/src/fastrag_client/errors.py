@@ -32,6 +32,10 @@ class PayloadTooLargeError(FastRAGError):
     """413 — ingest body exceeds server limit."""
 
 
+class ConflictError(FastRAGError):
+    """409 — concurrent operation in progress (e.g. bundle reload)."""
+
+
 class ServerError(FastRAGError):
     """500/503 — server-side failure."""
 
