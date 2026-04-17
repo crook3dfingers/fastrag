@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Weakness_Catalog xmlns="http://cwe.mitre.org/cwe-7" Version="4.19.1-test">
+  <Weaknesses>
+    <Weakness ID="89" Name="Improper Neutralization of Special Elements used in an SQL Command ('SQL Injection')">
+      <Description>The product constructs all or part of an SQL command using externally-influenced input from an upstream component, but it does not neutralize or incorrectly neutralizes special elements.</Description>
+      <Extended_Description>Without sufficient removal or quoting of SQL syntax in user-controllable inputs, the generated SQL query can cause those inputs to be interpreted as SQL instead of ordinary user data.</Extended_Description>
+      <Related_Weaknesses>
+        <Related_Weakness Nature="ChildOf" CWE_ID="943" View_ID="1000"/>
+      </Related_Weaknesses>
+      <Applicable_Platforms>
+        <Language Class="Not Language-Specific" Prevalence="Undetermined"/>
+      </Applicable_Platforms>
+    </Weakness>
+    <Weakness ID="943" Name="Improper Neutralization of Special Elements in Data Query Logic">
+      <Description>The product uses a structured query language to perform queries of a database or data store, but it does not neutralize or incorrectly neutralizes special elements in the query.</Description>
+      <Extended_Description>This can allow attackers to modify the query logic of the structured query language.</Extended_Description>
+      <Related_Weaknesses>
+        <Related_Weakness Nature="ChildOf" CWE_ID="74" View_ID="1000"/>
+      </Related_Weaknesses>
+      <Applicable_Platforms>
+        <Language Class="Not Language-Specific" Prevalence="Undetermined"/>
+        <Technology Class="Database Server" Prevalence="Often"/>
+      </Applicable_Platforms>
+    </Weakness>
+    <Weakness ID="74" Name="Improper Neutralization of Special Elements in Output Used by a Downstream Component ('Injection')">
+      <Description>The product constructs all or part of a command, data structure, or record using externally-influenced input from an upstream component, but it does not neutralize or incorrectly neutralizes special elements.</Description>
+      <Extended_Description></Extended_Description>
+      <Related_Weaknesses/>
+      <Applicable_Platforms>
+        <Language Class="Not Language-Specific" Prevalence="Undetermined"/>
+      </Applicable_Platforms>
+    </Weakness>
+  </Weaknesses>
+</Weakness_Catalog>
