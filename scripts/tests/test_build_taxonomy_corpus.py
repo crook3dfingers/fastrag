@@ -14,7 +14,7 @@ FIXTURE_CWE = Path(__file__).parent / "fixtures" / "cwe-tree-mini.xml"
 def test_emit_cwe_jsonl_contains_sql_injection(tmp_path: Path) -> None:
     out = tmp_path / "cwe.jsonl"
     n = emit_cwe_jsonl(source=FIXTURE_CWE, dest=out)
-    assert n >= 3
+    assert n == 3
     lines = [json.loads(line) for line in out.read_text().splitlines()]
     sqli = next(r for r in lines if r["cwe_id"] == 89)
     assert sqli["name"].startswith("Improper Neutralization of Special Elements")
@@ -24,7 +24,8 @@ def test_emit_cwe_jsonl_contains_sql_injection(tmp_path: Path) -> None:
 
 def test_emit_cwe_jsonl_children_inverted(tmp_path: Path) -> None:
     out = tmp_path / "cwe.jsonl"
-    emit_cwe_jsonl(source=FIXTURE_CWE, dest=out)
+    n = emit_cwe_jsonl(source=FIXTURE_CWE, dest=out)
+    assert n == 3
     lines = [json.loads(line) for line in out.read_text().splitlines()]
     by_id = {r["cwe_id"]: r for r in lines}
     # CWE-943 is parent of CWE-89, so 89 should appear in 943's children
