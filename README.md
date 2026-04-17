@@ -769,6 +769,10 @@ hits = client.query(
 
 Requires Python 3.11+. Run `pytest` from `clients/python/` to exercise the respx-backed test suite.
 
+## Integrations
+
+- **VAMS** — see [`docs/vams-integration.md`](docs/vams-integration.md) for wiring fastrag into VAMS as a retrieval + reference-lookup sidecar, including airgap packaging.
+
 ## Architecture
 
 FastRAG uses a workspace of small, focused crates:
