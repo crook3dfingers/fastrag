@@ -5,7 +5,7 @@
   "corpora": ["cwe", "kev"],
   "taxonomy": "cwe-taxonomy.json",
   "sources": {
-    "cwe": {"type": "mitre-xml", "path": "data/cwec_v4.19.1.xml"},
+    "cwe": {"type": "mitre-xml", "version": "v4.19.1", "sha256": "61e08a4e9298ba77f2213f6d467ff00557b90d11f37ecf710204237339d9c68f"},
     "kev": {"type": "cisa-feed", "sha256": "054951511c494571f240615a9e40c4b7f8e5a1d8101a5b274659054528fea888"}
   }
 }

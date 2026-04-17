@@ -11,25 +11,35 @@
 #
 # Prerequisites:
 #   - `cargo build --release` has produced target/release/fastrag.
-#   - A MITRE CWE XML catalog is available at $CWE_XML.
-#     Default: crates/fastrag-cwe/tests/fixtures/mini_cwe.xml is WRONG —
-#     that is a unit-test fixture. Operators must supply the real catalog
-#     (see docs for download instructions). The default below uses a
-#     canonical in-repo path; override via $CWE_XML if you have your own.
+#   - A MITRE CWE XML catalog is available at $CWE_XML and the matching
+#     SHA-256 pin at $CWE_SHA_FILE. The simplest way to provision both:
+#         scripts/fetch-cwe.sh data v4.19.1
+#     which downloads + SHA-verifies the MITRE zip and extracts the XML.
+#     Airgap operators who pre-staged the XML must also ship the SHA pin.
 
 set -euo pipefail
 
 BUNDLE_DIR="${BUNDLE_DIR:-bundles/vams-lookup-v1}"
-CWE_XML="${CWE_XML:-data/cwec_v4.19.1.xml}"
+CWE_VERSION="${CWE_VERSION:-v4.19.1}"
+CWE_XML="${CWE_XML:-data/cwec_${CWE_VERSION}.xml}"
+CWE_SHA_FILE="${CWE_SHA_FILE:-data/cwe-${CWE_VERSION}.sha256}"
 FASTRAG="${FASTRAG:-target/release/fastrag}"
 DATA_DIR="$(mktemp -d -t vams-lookup-build-XXXXXX)"
 trap 'rm -rf "$DATA_DIR"' EXIT
 
 if [[ ! -f "$CWE_XML" ]]; then
   echo "CWE XML not found at $CWE_XML" >&2
-  echo "Set CWE_XML=/path/to/cwec_v4.19.1.xml (download from https://cwe.mitre.org/data/xml/)" >&2
+  echo "Run 'scripts/fetch-cwe.sh data ${CWE_VERSION}' to download + SHA-verify," >&2
+  echo "or set CWE_XML=/path/to/catalog.xml if you already staged it (airgap)." >&2
   exit 1
 fi
+
+if [[ ! -f "$CWE_SHA_FILE" ]]; then
+  echo "CWE SHA pin missing at $CWE_SHA_FILE" >&2
+  echo "Run 'scripts/fetch-cwe.sh data ${CWE_VERSION}' to pin it." >&2
+  exit 1
+fi
+CWE_SHA="$(cat "$CWE_SHA_FILE")"
 
 if [[ ! -x "$FASTRAG" ]]; then
   echo "fastrag binary not found at $FASTRAG — run 'cargo build --release' first" >&2
@@ -98,7 +108,7 @@ cat > "$BUNDLE_DIR/bundle.json" <<EOF
   "corpora": ["cwe", "kev"],
   "taxonomy": "cwe-taxonomy.json",
   "sources": {
-    "cwe": {"type": "mitre-xml", "path": "$CWE_XML"},
+    "cwe": {"type": "mitre-xml", "version": "$CWE_VERSION", "sha256": "$CWE_SHA"},
     "kev": {"type": "cisa-feed", "sha256": "$KEV_SHA"}
   }
 }
