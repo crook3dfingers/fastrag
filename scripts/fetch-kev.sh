@@ -16,7 +16,10 @@ SHA_FILE="$DEST/kev.sha256"
 OUT="$DEST/known_exploited_vulnerabilities.json"
 
 mkdir -p "$DEST"
-curl -sSf -o "$OUT" "$URL"
+# Atomic write: a curl interrupted by Ctrl+C or network drop must not leave a
+# partial file that would then be SHA-pinned on next run.
+curl -sSf -o "$OUT.tmp" "$URL"
+mv "$OUT.tmp" "$OUT"
 
 ACTUAL="$(sha256sum "$OUT" | awk '{print $1}')"
 
