@@ -52,12 +52,40 @@ pub fn runtime_identity_for_profile(
 pub fn load_from_profile(
     profile: &ResolvedEmbedderProfile,
 ) -> Result<DynEmbedder, EmbedLoaderError> {
+    validate_profile(profile)?;
     match profile.backend {
         EmbedBackend::Bge => load_bge(profile),
         EmbedBackend::Openai => load_openai(profile),
         EmbedBackend::Ollama => load_ollama(profile),
         EmbedBackend::LlamaCpp => load_llama_cpp(profile),
     }
+}
+
+fn validate_profile(profile: &ResolvedEmbedderProfile) -> Result<(), EmbedLoaderError> {
+    match profile.backend {
+        EmbedBackend::Bge | EmbedBackend::Openai => {
+            if has_prefix_override(&profile.prefix) {
+                return Err(EmbedLoaderError::Embed(format!(
+                    "embedder profile `{}` on backend `{}` has an unsupported prefix override",
+                    profile.name,
+                    backend_name(profile.backend)
+                )));
+            }
+            if profile.dim_override.is_some() {
+                return Err(EmbedLoaderError::Embed(format!(
+                    "embedder profile `{}` on backend `{}` has an unsupported dim override",
+                    profile.name,
+                    backend_name(profile.backend)
+                )));
+            }
+            Ok(())
+        }
+        EmbedBackend::Ollama | EmbedBackend::LlamaCpp => Ok(()),
+    }
+}
+
+fn has_prefix_override(prefix: &PrefixConfig) -> bool {
+    !prefix.query.is_empty() || !prefix.passage.is_empty()
 }
 
 pub fn load_from_manifest(corpus_dir: &Path) -> Result<DynEmbedder, EmbedLoaderError> {

@@ -52,18 +52,7 @@ pub fn run_config_matrix(
     )
     .map_err(|e| EvalError::Runner(format!("loading corpus driver: {e}")))?;
 
-    let variant_filter: Option<Vec<ConfigVariant>> = variants.map(|s| {
-        s.split(',')
-            .map(|label| {
-                ConfigVariant::from_label(label.trim()).unwrap_or_else(|| {
-                    panic!(
-                        "unknown variant '{}'; valid: primary, no_rerank, no_contextual, dense_only, temporal_auto, temporal_oracle",
-                        label.trim()
-                    )
-                })
-            })
-            .collect()
-    });
+    let variant_filter = parse_variant_filter(variants)?;
 
     let matrix_report = run_matrix(&driver, &gs, top_k, variant_filter.as_deref())?;
 
@@ -108,6 +97,23 @@ fn load_embedder_for_config_matrix(ctx_corpus: &Path) -> Result<fastrag::DynEmbe
         }
         Err(e) => Err(EvalError::Runner(format!("loading fastrag.toml: {e}"))),
     }
+}
+
+fn parse_variant_filter(variants: Option<String>) -> Result<Option<Vec<ConfigVariant>>, EvalError> {
+    variants
+        .map(|s| {
+            s.split(',')
+                .map(|label| {
+                    let label = label.trim();
+                    ConfigVariant::from_label(label).ok_or_else(|| {
+                        EvalError::Runner(format!(
+                            "unknown variant '{label}'; valid: primary, no_rerank, no_contextual, dense_only, temporal_auto, temporal_oracle"
+                        ))
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()
 }
 
 #[cfg(test)]
@@ -225,5 +231,15 @@ model = "text-embedding-3-small"
             msg.contains("default profile"),
             "expected default profile guidance, got: {msg}"
         );
+    }
+
+    #[test]
+    fn invalid_variant_label_returns_runner_error() {
+        let err = parse_variant_filter(Some("primary,not-a-variant".into()))
+            .expect_err("invalid variant should return an error");
+
+        let msg = err.to_string();
+        assert!(msg.contains("unknown variant"), "unexpected error: {msg}");
+        assert!(msg.contains("not-a-variant"), "unexpected error: {msg}");
     }
 }

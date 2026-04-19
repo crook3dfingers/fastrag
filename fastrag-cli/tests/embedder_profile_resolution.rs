@@ -212,3 +212,50 @@ fn resolved_llama_cpp_profile_produces_runtime_identity_shape() {
     assert_eq!(identity.dim, 1024);
     assert_ne!(identity.prefix_scheme_hash, 0);
 }
+
+#[test]
+fn openai_profile_rejects_unsupported_prefix_override_before_loader_io() {
+    let profile = ResolvedEmbedderProfile {
+        name: "openai".into(),
+        backend: EmbedBackend::Openai,
+        model: "text-embedding-3-small".into(),
+        base_url: None,
+        prefix: PrefixConfig {
+            query: "query: ".into(),
+            passage: String::new(),
+        },
+        dim_override: None,
+    };
+
+    let err = match fastrag_cli::embed_loader::load_from_profile(&profile) {
+        Ok(_) => panic!("openai prefix override should fail before loader startup"),
+        Err(err) => err,
+    };
+
+    assert!(
+        err.to_string().contains("unsupported prefix override"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn bge_profile_rejects_unsupported_dim_override_before_loader_io() {
+    let profile = ResolvedEmbedderProfile {
+        name: "bge".into(),
+        backend: EmbedBackend::Bge,
+        model: "fastrag/bge-small-en-v1.5".into(),
+        base_url: None,
+        prefix: PrefixConfig::default(),
+        dim_override: Some(768),
+    };
+
+    let err = match fastrag_cli::embed_loader::load_from_profile(&profile) {
+        Ok(_) => panic!("bge dim override should fail before loader startup"),
+        Err(err) => err,
+    };
+
+    assert!(
+        err.to_string().contains("unsupported dim override"),
+        "unexpected error: {err}"
+    );
+}
