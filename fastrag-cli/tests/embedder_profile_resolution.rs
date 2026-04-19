@@ -259,3 +259,71 @@ fn bge_profile_rejects_unsupported_dim_override_before_loader_io() {
         "unexpected error: {err}"
     );
 }
+
+#[test]
+fn openai_profile_rejects_ollama_url_override() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config_path = write_config(
+        &dir,
+        r#"
+[embedder]
+default_profile = "openai-default"
+
+[embedder.profiles.openai-default]
+backend = "openai"
+model = "text-embedding-3-small"
+base_url = "https://api.openai.com/v1"
+"#,
+    );
+
+    let cfg = fastrag_cli::config::load_app_config(Some(config_path)).expect("load config");
+    let err = cfg
+        .resolve_embedder_profile(
+            Some("openai-default"),
+            &[("ollama_url", "http://localhost:11434")],
+        )
+        .expect_err("mismatched ollama_url override should fail");
+
+    assert!(
+        err.to_string().contains("ollama_url"),
+        "unexpected error: {err}"
+    );
+    assert!(
+        err.to_string().contains("openai"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn ollama_profile_rejects_openai_base_url_override() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config_path = write_config(
+        &dir,
+        r#"
+[embedder]
+default_profile = "ollama-default"
+
+[embedder.profiles.ollama-default]
+backend = "ollama"
+model = "mixedbread-ai/mxbai-embed-large-v1"
+base_url = "http://localhost:11434"
+"#,
+    );
+
+    let cfg = fastrag_cli::config::load_app_config(Some(config_path)).expect("load config");
+    let err = cfg
+        .resolve_embedder_profile(
+            Some("ollama-default"),
+            &[("openai_base_url", "https://api.openai.com/v1")],
+        )
+        .expect_err("mismatched openai_base_url override should fail");
+
+    assert!(
+        err.to_string().contains("openai_base_url"),
+        "unexpected error: {err}"
+    );
+    assert!(
+        err.to_string().contains("ollama"),
+        "unexpected error: {err}"
+    );
+}

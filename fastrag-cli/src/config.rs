@@ -24,6 +24,14 @@ pub enum ConfigError {
         profile: String,
         backend: EmbedBackend,
     },
+    #[error(
+        "embedder profile `{profile}` on backend `{backend:?}` does not accept CLI override `{key}`"
+    )]
+    IncompatibleOverride {
+        profile: String,
+        backend: EmbedBackend,
+        key: String,
+    },
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -122,6 +130,12 @@ impl AppConfig {
                 base_url = Some((*value).to_string());
             } else if *key == "openai_base_url" && profile.backend == EmbedBackend::Openai {
                 base_url = Some((*value).to_string());
+            } else if *key == "ollama_url" || *key == "openai_base_url" {
+                return Err(ConfigError::IncompatibleOverride {
+                    profile: profile_name.to_string(),
+                    backend: profile.backend,
+                    key: (*key).to_string(),
+                });
             }
         }
 
