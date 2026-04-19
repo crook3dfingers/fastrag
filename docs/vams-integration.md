@@ -81,6 +81,8 @@ Add a `fastrag` service block alongside the existing `vams-api` / `vams-frontend
       - /etc/fastrag/fastrag.toml
       - --embedder-profile
       - vams
+      - --bundles-dir
+      - /var/lib/fastrag/bundles
       - --bundle-path
       - /var/lib/fastrag/bundles/${FASTRAG_BUNDLE_NAME:-vams-lookup-v1}
       - --corpus
@@ -91,12 +93,6 @@ Add a `fastrag` service block alongside the existing `vams-api` / `vams-frontend
       BUNDLE_NAME: "${FASTRAG_BUNDLE_NAME:-vams-lookup-v1}"
       FASTRAG_TOKEN: "${FASTRAG_TOKEN:-}"
       FASTRAG_ADMIN_TOKEN: "${FASTRAG_ADMIN_TOKEN:-}"
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8080/ready"]
-      interval: 10s
-      timeout: 5s
-      retries: 30
-      start_period: 120s
     restart: unless-stopped
 ```
 
@@ -112,7 +108,7 @@ Wire the dependency and URL into `vams-api`:
       FASTRAG_ADMIN_TOKEN: "${FASTRAG_ADMIN_TOKEN:-}"
     depends_on:
       fastrag:
-        condition: service_healthy
+        condition: service_started
 ```
 
 This example assumes a separate Ollama service named `ollama` on the same
@@ -122,8 +118,9 @@ compose network. Pull the embedding model into that service before first use:
 docker compose exec ollama ollama pull mixedbread-ai/mxbai-embed-large-v1
 ```
 
-`start_period: 120s` is deliberate: first boot may wait on bundle load plus
-Ollama readiness or an initial model pull before `/ready` flips to 200.
+Use `/ready` as an external readiness probe from your orchestrator, reverse
+proxy, or deployment checks. The published image is distroless, so do not rely
+on in-container `curl` or shell-based healthchecks.
 
 Add the profile config alongside `docker-compose.yml`:
 
@@ -329,6 +326,7 @@ The `vams-lookup-v1` bundle ships two fixed-name corpora — `cwe` and `kev` —
 fastrag serve-http \
     --config /etc/fastrag/fastrag.toml \
     --embedder-profile vams \
+    --bundles-dir /var/lib/fastrag/bundles \
     --bundle-path /var/lib/fastrag/bundles/vams-lookup-v1 \
     --corpus vams-findings=/var/lib/fastrag/corpora/vams-findings \
     --port 8080

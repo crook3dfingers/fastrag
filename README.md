@@ -821,7 +821,14 @@ The repo ships a multi-stage `Dockerfile` that produces a distroless image (~50 
 
 ```bash
 docker build -t fastrag .
-docker run -p 8081:8081 -v /srv/fastrag:/var/lib/fastrag fastrag
+docker run --rm -p 8081:8081 \
+  -v /srv/fastrag/corpus:/var/lib/fastrag/corpus \
+  -v /srv/fastrag/fastrag.toml:/etc/fastrag/fastrag.toml:ro \
+  fastrag serve-http \
+    --corpus /var/lib/fastrag/corpus \
+    --config /etc/fastrag/fastrag.toml \
+    --embedder-profile local-ollama \
+    --port 8081
 ```
 
 ## Clients
