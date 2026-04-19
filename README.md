@@ -245,7 +245,55 @@ frontmatter, with the later layer winning. Supported kinds in
 When `--metadata-fields` is set, typed values land in every chunk's
 `user_fields` and become consumable by temporal decay and metadata filters.
 
-The CLI accepts an optional local model path with `--model-path`. If omitted, FastRAG loads the default BGE-small-en-v1.5 embedder and caches it under `dirs::cache_dir()/fastrag/models/bge-small-en-v1.5`.
+### Embedder profiles
+
+Retrieval commands load embedders from a resolved profile in `fastrag.toml`.
+Place the file in the working directory for automatic discovery, or pass
+`--config` explicitly. Use the same profile for `index`, `query`,
+`corpus-info`, and `serve-http` so prefix-aware corpora keep their runtime
+identity aligned with the loader.
+
+Example `fastrag.toml`:
+
+```toml
+[embedder]
+default_profile = "local-ollama"
+
+[embedder.profiles.local-ollama]
+backend = "ollama"
+model = "mixedbread-ai/mxbai-embed-large-v1"
+base_url = "http://localhost:11434"
+use_catalog_defaults = true
+
+[embedder.profiles.local-bge]
+backend = "bge"
+model = "bge-small-en-v1.5"
+
+[embedder.profiles.openai-large]
+backend = "openai"
+model = "text-embedding-3-large"
+```
+
+Example retrieval commands:
+
+```bash
+fastrag index ./docs \
+    --corpus ./my-corpus \
+    --config ./fastrag.toml \
+    --embedder-profile local-ollama
+
+fastrag query "payment terms" \
+    --corpus ./my-corpus \
+    --config ./fastrag.toml \
+    --embedder-profile local-ollama \
+    --top-k 5
+
+fastrag serve-http \
+    --corpus ./my-corpus \
+    --config ./fastrag.toml \
+    --embedder-profile local-ollama \
+    --port 8081
+```
 
 ### Library
 
@@ -263,28 +311,20 @@ Quality, latency, and footprint baselines for the retrieval pipeline are tracked
 
 ### Embedder backends
 
-FastRAG ships four embedder backends, selectable via `--embedder`:
+FastRAG ships four profile backends:
 
-| Backend | Flag | Dim | Requirements |
-|---|---|---|---|
-| Local BGE (default) | `--embedder bge` | 384 | None (CPU, bundled weights) |
-| Qwen3-Embed-0.6B Q8 | `--embedder qwen3-q8` | 1024 | `llama-server` in `$PATH` |
-| OpenAI | `--embedder openai` | 1536 / 3072 | `OPENAI_API_KEY` env var |
-| Ollama | `--embedder ollama` | varies | Running Ollama instance |
+| Backend | Models | Requirements |
+|---|---|---|
+| BGE | `bge-small-en-v1.5` | None (CPU, bundled weights) |
+| OpenAI | `text-embedding-3-small`, `text-embedding-3-large` | `OPENAI_API_KEY` env var |
+| Ollama | Any pulled Ollama embedding model | Running Ollama instance |
+| llama.cpp | Any GGUF model served through `llama-server` | `llama-server` in `$PATH` |
 
-**Qwen3 setup:**
-
-```bash
-# Install llama-server from https://github.com/ggml-org/llama.cpp/releases (b5000+)
-fastrag doctor              # Verify llama-server installation and version
-fastrag index ./docs --corpus ./my-corpus --embedder qwen3-q8
-```
-
-The GGUF model downloads from HuggingFace Hub on first use and caches under `~/.cache/fastrag/models/`. Override with `$FASTRAG_MODEL_DIR`.
-
-OpenAI supports `text-embedding-3-small` (1536-d) and `text-embedding-3-large` (3072-d). Ollama probes the model's dimension on startup, so any pulled embedding model works.
-
-Once a corpus is indexed, `query` and `serve-http` read the backend from the manifest's `identity.model_id` (manifest schema v3). Omit `--embedder` on read paths to use the recorded backend; passing an explicit `--embedder` that disagrees with the manifest is a hard error. On load, fastrag re-embeds a fixed canary string and verifies the cosine similarity against the stored canary vector (≥ 0.999) to detect silent embedder drift. Pre-v3 corpora are not supported and hard-fail with `UnsupportedSchema`.
+BGE uses the bundled local model. OpenAI supports
+`text-embedding-3-small` (1536-d) and `text-embedding-3-large` (3072-d).
+Ollama probes the model dimension on startup, so any pulled embedding model
+works. `llama.cpp` profiles use the configured model name for runtime identity
+and load through a generic `llama-server` embedder path.
 
 #### Testing against real APIs
 
@@ -635,11 +675,14 @@ FastRAG ships with a hand-curated gold set and a config matrix for measuring ret
 
 ```bash
 # Build both corpora (contextualized + raw)
+# Assumes ./fastrag.toml defines an `eval-llama` embedder profile.
 cargo run --release --features retrieval,rerank,hybrid,contextual,contextual-llama -- \
-  index tests/gold/corpus --corpus /tmp/ctx --embedder qwen3-q8 --contextualize
+  index tests/gold/corpus --corpus /tmp/ctx \
+  --config ./fastrag.toml --embedder-profile eval-llama --contextualize
 
 cargo run --release --features retrieval,rerank,hybrid,contextual,contextual-llama -- \
-  index tests/gold/corpus --corpus /tmp/raw --embedder qwen3-q8
+  index tests/gold/corpus --corpus /tmp/raw \
+  --config ./fastrag.toml --embedder-profile eval-llama
 
 # Run the 4-variant matrix
 cargo run --release --features eval,retrieval,rerank,hybrid,contextual,contextual-llama -- \

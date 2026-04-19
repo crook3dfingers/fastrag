@@ -6,6 +6,7 @@ How to wire [fastrag](../README.md) into VAMS as a retrieval + reference-lookup 
 
 - fastrag is a standalone HTTP service VAMS calls for **finding dedup** (`POST /similar`) and **CWE/KEV reference lookups** (`GET /cwe/{id}`, `GET /cwe/relation`).
 - fastrag is **not** an LLM proxy. VAMS vetting keeps calling llama-server directly via `TARMO_VETTING_TIER*` — unchanged.
+- fastrag retrieval now loads from a named embedder profile in `fastrag.toml`; the VAMS example below mounts `/etc/fastrag/fastrag.toml` and starts `serve-http --config ... --embedder-profile vams`.
 - Two install paths: (A) add fastrag as a service in VAMS's `docker-compose.yml` (default), or (B) run the standalone [airgap DVD image](./airgap-install.md) on a separate host and point VAMS at it via `FASTRAG_URL`.
 - Smoke test: `curl -fsS $FASTRAG_URL/ready` — expect `{"ready": true, ...}`.
 
@@ -21,7 +22,7 @@ fastrag exposes a `vams-lookup-v1` bundle of pre-built reference corpora (`cwe`,
 
 What fastrag does **not** do:
 
-- **No LLM inference.** Vetting LLM calls stay on `TARMO_VETTING_TIER1_ENDPOINT` / `TARMO_VETTING_TIER2_ENDPOINT` (see `vams/core/vetting_service.py`). fastrag's internal embedder and reranker subprocesses bind to the container's loopback only — they are not VAMS-accessible LLM endpoints.
+- **No LLM inference.** Vetting LLM calls stay on `TARMO_VETTING_TIER1_ENDPOINT` / `TARMO_VETTING_TIER2_ENDPOINT` (see `vams/core/vetting_service.py`). fastrag's retrieval embedder comes from the configured profile in `/etc/fastrag/fastrag.toml`; VAMS still only talks to fastrag's HTTP endpoints.
 - **No session state or secrets.** Bundles contain public CVE/CWE/KEV data; the findings corpus must never contain credentials, session tokens, or customer secrets. Scrub before `POST /similar`.
 - **No bundle signature verification** (yet). VAMS verifies bundles via `tarmo_vuln_core.signing.ReportSigner` before calling `POST /admin/reload`. Rust-side verification is deferred to fastrag issue #66.
 
@@ -32,8 +33,8 @@ What fastrag does **not** do:
 │                                                                             │
 │   vams-api ──► fastrag (port 8080)                                          │
 │        │         │                                                          │
-│        │         ├─ internal llama-server: embedder (Qwen3-Embed-0.6B Q8)   │
-│        │         ├─ internal llama-server: reranker (BGE-rerank-v2-m3 Q8)   │
+│        │         ├─ /etc/fastrag/fastrag.toml (mounted config)              │
+│        │         ├─ embedder profile `vams`                                 │
 │        │         └─ /var/lib/fastrag/bundles/<name>/  (mounted volume)      │
 │        │                                                                    │
 │        └──► llama-server (8081/8082) ◄── vetting LLM, unchanged             │
@@ -57,6 +58,20 @@ Add a `fastrag` service block alongside the existing `vams-api` / `vams-frontend
       - "${FASTRAG_PORT:-8080}:8080"
     volumes:
       - ${FASTRAG_BUNDLES_DIR:-./bundles}:/var/lib/fastrag/bundles:ro
+      - ${FASTRAG_FINDINGS_DIR:-./fastrag-corpora/vams-findings}:/var/lib/fastrag/corpora/vams-findings
+      - ${FASTRAG_CONFIG_PATH:-./fastrag.toml}:/etc/fastrag/fastrag.toml:ro
+    command:
+      - serve-http
+      - --config
+      - /etc/fastrag/fastrag.toml
+      - --embedder-profile
+      - vams
+      - --bundle-path
+      - /var/lib/fastrag/bundles/${FASTRAG_BUNDLE_NAME:-vams-lookup-v1}
+      - --corpus
+      - vams-findings=/var/lib/fastrag/corpora/vams-findings
+      - --port
+      - "8080"
     environment:
       BUNDLE_NAME: "${FASTRAG_BUNDLE_NAME:-vams-lookup-v1}"
       FASTRAG_TOKEN: "${FASTRAG_TOKEN:-}"
@@ -87,6 +102,23 @@ Wire the dependency and URL into `vams-api`:
 
 `start_period: 120s` is deliberate: first boot loads two GGUFs (~1 GB combined) before `/ready` flips to 200.
 
+Add the profile config alongside `docker-compose.yml`:
+
+```toml
+[embedder]
+default_profile = "vams"
+
+[embedder.profiles.vams]
+backend = "ollama"
+model = "mixedbread-ai/mxbai-embed-large-v1"
+base_url = "http://ollama:11434"
+use_catalog_defaults = true
+```
+
+This keeps VAMS on the mixedbread embedding model while letting the actual
+endpoint live in config instead of the container entrypoint. If your Ollama
+service uses a different hostname, change only `base_url`.
+
 ### 2. Extend the airgap save-bundle
 
 VAMS's airgap flow (`vams/docs/installation.md` lines 37–89) packs every required image into a single `docker save` tarball. Add `fastrag:<tag>` to the staging list:
@@ -105,9 +137,13 @@ Ship the fastrag bundle directory (CWE + KEV corpora) on the same media. On the 
 ```bash
 docker load -i vams-images.tar
 sudo mkdir -p /srv/vams/bundles
+sudo mkdir -p /srv/vams/fastrag
 sudo cp -r /path/on/media/fastrag-<date> /srv/vams/bundles/
+sudo cp /path/on/media/fastrag.toml /srv/vams/fastrag/fastrag.toml
 # In .env:
 #   FASTRAG_BUNDLES_DIR=/srv/vams/bundles
+#   FASTRAG_FINDINGS_DIR=/srv/vams/fastrag-corpora/vams-findings
+#   FASTRAG_CONFIG_PATH=/srv/vams/fastrag/fastrag.toml
 #   FASTRAG_BUNDLE_NAME=fastrag-<date>
 #   FASTRAG_TOKEN=$(openssl rand -hex 32)
 #   FASTRAG_ADMIN_TOKEN=$(openssl rand -hex 32)
@@ -266,6 +302,8 @@ The `vams-lookup-v1` bundle ships two fixed-name corpora — `cwe` and `kev` —
 
 ```bash
 fastrag serve-http \
+    --config /etc/fastrag/fastrag.toml \
+    --embedder-profile vams \
     --bundle-path /var/lib/fastrag/bundles/vams-lookup-v1 \
     --corpus vams-findings=/var/lib/fastrag/corpora/vams-findings \
     --port 8080
@@ -273,7 +311,9 @@ fastrag serve-http \
 
 The bundle's `cwe` and `kev` corpora are auto-registered from `bundle/corpora/` and drive `/ready`, `/cwe/{id}`, and `/cwe/relation`. The findings corpus is reached via `POST /similar` with `corpus: "vams-findings"`. Reload swaps the bundle's reference data without touching the findings corpus.
 
-Mount the bundle directory read-only at `/var/lib/fastrag/bundles/` and set `BUNDLE_NAME` to the directory name (`vams-lookup-v1`). Mount the findings corpus separately at `/var/lib/fastrag/corpora/vams-findings` (read-write, since `POST /ingest` appends to it).
+Mount the bundle directory read-only at `/var/lib/fastrag/bundles/`, the
+findings corpus read-write at `/var/lib/fastrag/corpora/vams-findings`, and the
+embedder config read-only at `/etc/fastrag/fastrag.toml`.
 
 ### Hot reload on new NVD/KEV snapshot
 
@@ -317,6 +357,8 @@ On 503, `ReadyStatus.reasons` contains one or more of:
 | `FASTRAG_URL` | VAMS | `http://fastrag:8080` | yes | Where VAMS reaches fastrag |
 | `FASTRAG_PORT` | compose host | `8080` | no | Host-side port mapping |
 | `FASTRAG_BUNDLES_DIR` | compose host | `./bundles` | no | Host directory mounted into the container |
+| `FASTRAG_FINDINGS_DIR` | compose host | `./fastrag-corpora/vams-findings` | no | Host directory mounted as the mutable findings corpus |
+| `FASTRAG_CONFIG_PATH` | compose host | `./fastrag.toml` | yes | Host path mounted to `/etc/fastrag/fastrag.toml` |
 | `FASTRAG_BUNDLE_NAME` | compose host | `vams-lookup-v1` | yes | Bundle directory to load |
 | `PORT` | fastrag container | `8080` | no | Listen port inside the container |
 
