@@ -1,7 +1,7 @@
 # fastrag airgap image
 
 Debian-12 slim runtime with `fastrag`, `llama-server`, and pre-staged GGUFs
-for a completely offline security lookup + retrieval service. Built by
+for a completely offline security lookup service. Built by
 `docker/Dockerfile.airgap`.
 
 ## Layout at runtime
@@ -11,10 +11,15 @@ for a completely offline security lookup + retrieval service. Built by
 /usr/local/bin/llama-server         # spawned as a subprocess per role
 /opt/fastrag/lib/                   # libonnxruntime.so.* (on LD_LIBRARY_PATH)
 /opt/fastrag/models/                # $FASTRAG_MODEL_DIR
-    Qwen3-Embedding-0.6B-Q8_0.gguf  # embedder (qwen3-q8)
+    Qwen3-Embedding-0.6B-Q8_0.gguf  # llama-cpp embedder for the airgap profile
     bge-reranker-v2-m3-q8_0.gguf    # reranker (llama-cpp)
 /var/lib/fastrag/bundles/           # mount your bundles here
 ```
+
+The container entrypoint writes a temporary `fastrag.toml` at startup and
+selects the `airgap` embedder profile. That profile resolves the bundled
+Qwen3 GGUF through the llama-cpp backend, so operators no longer pass the
+removed `--embedder qwen3-q8` preset directly.
 
 ## Environment variables
 
@@ -25,7 +30,7 @@ for a completely offline security lookup + retrieval service. Built by
 | `FASTRAG_ADMIN_TOKEN`   | no       | Admin token for `/admin/reload`. Must differ from read. |
 | `BUNDLES_DIR`           | no       | Override bundles root (default `/var/lib/fastrag/bundles`). |
 | `PORT`                  | no       | Listen port inside the container (default `8080`).      |
-| `FASTRAG_MODEL_DIR`     | preset   | Points at the pre-staged GGUFs. Do not override.        |
+| `FASTRAG_MODEL_DIR`     | preset   | Points at the pre-staged GGUFs used by the airgap profile. |
 
 ## Run
 
@@ -46,5 +51,5 @@ All three gates are wired into `make`:
 make airgap-image            # docker build
 make airgap-size             # fails if image > 1.5 GiB
 make airgap-no-phone-home    # boots with --network=none, checks logs
-make airgap-smoke            # fixture bundle + /health /ready /cwe/relation
+make airgap-smoke            # fixture bundle + profile-first /health /ready /cwe/relation
 ```

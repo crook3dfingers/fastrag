@@ -6,9 +6,9 @@
 #   FASTRAG_ADMIN_TOKEN   — admin token for /admin/reload (optional).
 #   FASTRAG_TOKEN         — read token for /query, /cve, /cwe, etc. (optional).
 #
-# fastrag spawns its own llama-server subprocesses for the Qwen3 embedder and
-# the BGE-reranker-v2-m3 reranker, resolving GGUF files via $FASTRAG_MODEL_DIR.
-# No network access is attempted at start-up.
+# fastrag spawns its own llama-server subprocesses for the llama-cpp embedder
+# profile and the BGE-reranker-v2-m3 reranker, resolving GGUF files via
+# $FASTRAG_MODEL_DIR. No network access is attempted at start-up.
 
 set -euo pipefail
 
@@ -54,11 +54,22 @@ if [[ -n "${FASTRAG_ADMIN_TOKEN:-}" ]]; then
     auth_args+=(--admin-token "${FASTRAG_ADMIN_TOKEN}")
 fi
 
+config_path="$(mktemp "${TMPDIR:-/tmp}/fastrag-airgap-XXXXXX.toml")"
+cat > "${config_path}" <<EOF
+[embedder]
+default_profile = "airgap"
+
+[embedder.profiles.airgap]
+backend = "llama-cpp"
+model_path = "${FASTRAG_MODEL_DIR}/Qwen3-Embedding-0.6B-Q8_0.gguf"
+EOF
+
 exec fastrag serve-http \
     "${corpus_args[@]}" \
     --bundle-path "${BUNDLE_PATH}" \
     --bundles-dir "${BUNDLES_DIR}" \
-    --embedder qwen3-q8 \
+    --config "${config_path}" \
+    --embedder-profile airgap \
     --rerank llama-cpp \
     --port "${PORT}" \
     "${auth_args[@]}"

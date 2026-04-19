@@ -2,10 +2,10 @@
 # End-to-end smoke test for the fastrag airgap image.
 #
 # Builds a minimal bundle fixture on the fly (bundle.json schema v1 + a
-# schema-v2 taxonomy + three empty corpora with the identity.model_id that
-# matches --embedder qwen3-q8), mounts it, starts the container, then probes
-# /health, /ready, and /cwe/relation. Pass tokens differ to exercise the
-# admin/read split.
+# schema-v2 taxonomy + three empty corpora whose identity.model_id matches the
+# llama-cpp airgap profile runtime identity), mounts it, starts the container,
+# then probes /health, /ready, and /cwe/relation. Pass tokens differ to
+# exercise the admin/read split.
 set -euo pipefail
 IMAGE="${1:?usage: $0 IMAGE}"
 CONTAINER="${CONTAINER:-fastrag-smoke}"
@@ -41,7 +41,8 @@ JSON
 
 # Minimal corpus manifest — embed_loader only reads identity.model_id for
 # read-path auto-detection. The smoke path never actually queries a corpus,
-# so empty index.bin / entries.bin are fine.
+# so empty index.bin / entries.bin are fine. The identity string is the
+# runtime model id produced by the llama-cpp airgap profile, not a CLI preset.
 for c in cve cwe kev; do
     cat > "${BUNDLE_DIR}/corpora/${c}/manifest.json" <<'JSON'
 {"identity":{"model_id":"Qwen/Qwen3-Embedding-0.6B-GGUF@Q8_0"}}
