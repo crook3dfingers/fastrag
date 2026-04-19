@@ -17,6 +17,8 @@ pub enum ConfigError {
     Toml(#[from] toml::de::Error),
     #[error("unknown embedder profile `{profile}`")]
     UnknownProfile { profile: String },
+    #[error("missing default embedder profile")]
+    MissingDefaultProfile,
     #[error("missing model for embedder profile `{profile}` on backend `{backend:?}`")]
     MissingModel {
         profile: String,
@@ -56,9 +58,9 @@ pub struct EmbedderProfileConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct PrefixSection {
     #[serde(default)]
-    pub query: String,
+    pub query: Option<String>,
     #[serde(default)]
-    pub passage: String,
+    pub passage: Option<String>,
 }
 
 pub fn default_config_path() -> Option<PathBuf> {
@@ -89,9 +91,16 @@ impl AppConfig {
         selected: Option<&str>,
         cli_overrides: &[(&str, &str)],
     ) -> Result<ResolvedEmbedderProfile, ConfigError> {
-        let profile_name = selected
-            .filter(|name| !name.is_empty())
-            .unwrap_or(&self.embedder.default_profile);
+        let profile_name = match selected.filter(|name| !name.is_empty()) {
+            Some(name) => name,
+            None => {
+                let default_profile = self.embedder.default_profile.trim();
+                if default_profile.is_empty() {
+                    return Err(ConfigError::MissingDefaultProfile);
+                }
+                default_profile
+            }
+        };
 
         let profile = self.embedder.profiles.get(profile_name).ok_or_else(|| {
             ConfigError::UnknownProfile {
@@ -114,14 +123,15 @@ impl AppConfig {
             }
         }
 
-        let prefix = if let Some(prefix) = &profile.prefix {
-            PrefixConfig {
-                query: prefix.query.clone(),
-                passage: prefix.passage.clone(),
+        let mut prefix = catalog_prefix_defaults(&model, profile.use_catalog_defaults);
+        if let Some(profile_prefix) = &profile.prefix {
+            if let Some(query) = &profile_prefix.query {
+                prefix.query = query.clone();
             }
-        } else {
-            catalog_prefix_defaults(&model, profile.use_catalog_defaults)
-        };
+            if let Some(passage) = &profile_prefix.passage {
+                prefix.passage = passage.clone();
+            }
+        }
 
         Ok(ResolvedEmbedderProfile {
             name: profile_name.to_string(),
