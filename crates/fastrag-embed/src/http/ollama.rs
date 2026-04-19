@@ -51,11 +51,25 @@ impl OllamaEmbedder {
 
     /// Test helper — skip dim probe.
     pub fn from_parts(base_url: String, model: String, dim: usize) -> Self {
+        Self::from_parts_with_prefix(base_url, model, dim, "", "")
+    }
+
+    /// Test helper — skip dim probe and configure explicit prefixes.
+    pub fn from_parts_with_prefix(
+        base_url: String,
+        model: String,
+        dim: usize,
+        query_prefix: &str,
+        passage_prefix: &str,
+    ) -> Self {
         Self {
             base_url,
             model,
             dim,
-            prefix_scheme: PrefixScheme::NONE,
+            prefix_scheme: PrefixScheme::new(
+                Box::leak(query_prefix.to_string().into_boxed_str()),
+                Box::leak(passage_prefix.to_string().into_boxed_str()),
+            ),
             client: build_client().expect("reqwest client"),
         }
     }
@@ -96,6 +110,14 @@ impl OllamaEmbedder {
             ));
         }
         Ok(parsed.embedding.len())
+    }
+
+    pub fn render_query_text(&self, input: &str) -> String {
+        format!("{}{}", self.prefix_scheme.query, input)
+    }
+
+    pub fn render_passage_text(&self, input: &str) -> String {
+        format!("{}{}", self.prefix_scheme.passage, input)
     }
 
     fn call(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>, EmbedError> {
@@ -151,7 +173,7 @@ impl DynEmbedderTrait for OllamaEmbedder {
     fn embed_query_dyn(&self, texts: &[QueryText]) -> Result<Vec<Vec<f32>>, EmbedError> {
         let prefixed: Vec<String> = texts
             .iter()
-            .map(|text| format!("{}{}", self.prefix_scheme.query, text.as_str()))
+            .map(|text| self.render_query_text(text.as_str()))
             .collect();
         let refs: Vec<&str> = prefixed.iter().map(String::as_str).collect();
         self.call(&refs)
@@ -160,7 +182,7 @@ impl DynEmbedderTrait for OllamaEmbedder {
     fn embed_passage_dyn(&self, texts: &[PassageText]) -> Result<Vec<Vec<f32>>, EmbedError> {
         let prefixed: Vec<String> = texts
             .iter()
-            .map(|text| format!("{}{}", self.prefix_scheme.passage, text.as_str()))
+            .map(|text| self.render_passage_text(text.as_str()))
             .collect();
         let refs: Vec<&str> = prefixed.iter().map(String::as_str).collect();
         self.call(&refs)
@@ -284,5 +306,52 @@ mod ollama_runtime_identity {
         assert_eq!(id.model_id, "ollama:nomic-embed-text");
         assert_eq!(id.dim, 768);
         assert_eq!(id.prefix_scheme_hash, PrefixScheme::NONE.hash());
+    }
+
+    #[test]
+    fn query_path_applies_prefix() {
+        let e = OllamaEmbedder::from_parts_with_prefix(
+            "http://localhost:11434".into(),
+            "nomic-embed-text".into(),
+            768,
+            "query: ",
+            "",
+        );
+
+        assert_eq!(e.render_query_text("hello"), "query: hello");
+    }
+
+    #[test]
+    fn passage_path_stays_unprefixed() {
+        let e = OllamaEmbedder::from_parts_with_prefix(
+            "http://localhost:11434".into(),
+            "nomic-embed-text".into(),
+            768,
+            "query: ",
+            "",
+        );
+
+        assert_eq!(e.render_passage_text("hello"), "hello");
+    }
+
+    #[test]
+    fn runtime_identity_hash_changes_with_prefix() {
+        let default = OllamaEmbedder::from_parts(
+            "http://localhost:11434".into(),
+            "nomic-embed-text".into(),
+            768,
+        );
+        let prefixed = OllamaEmbedder::from_parts_with_prefix(
+            "http://localhost:11434".into(),
+            "nomic-embed-text".into(),
+            768,
+            "query: ",
+            "",
+        );
+
+        assert_ne!(
+            default.runtime_identity().prefix_scheme_hash,
+            prefixed.runtime_identity().prefix_scheme_hash
+        );
     }
 }
