@@ -796,12 +796,18 @@ The `serve-http` subcommand exposes a small operational surface for production u
 
 ### Authentication
 
-`serve-http` supports a shared-secret bearer token. Set it via `--token <value>` or the `FASTRAG_TOKEN` env var (CLI flag wins). When configured, `/query` and `/metrics` require one of:
+`serve-http` supports a shared-secret bearer token. Set it via `--token <value>` or the `FASTRAG_TOKEN` env var (CLI flag wins). When configured, the read/write application endpoints require one of:
 
 - `X-Fastrag-Token: <token>`
 - `Authorization: Bearer <token>`
 
-`/health` remains unauthenticated for liveness probes. Token comparison is constant-time via the `subtle` crate. If no token is set, the server logs a startup warning and accepts every request — intended only for trusted localhost use.
+That protected set includes `/query`, `/batch-query`, `/similar`, `/ingest`,
+`/ingest/:id`, `/metrics`, `/corpora`, `/stats`, `/cve/:id`, `/cwe/:id`, and
+`/cwe/relation`. `/health` and `/ready` remain unauthenticated for probes, and
+`/admin/reload` uses the separate admin token. Token comparison is
+constant-time via the `subtle` crate. If no token is set, the server logs a
+startup warning and accepts every request except admin routes — intended only
+for trusted localhost use.
 
 ### Incremental indexing
 
@@ -813,7 +819,12 @@ Logs go to stdout via `tracing`. Set `FASTRAG_LOG_FORMAT=json` for one-line JSON
 
 ### systemd
 
-A sample unit file lives at `deploy/fastrag.service`. Copy it to `/etc/systemd/system/`, create the `fastrag` user and `/var/lib/fastrag/corpus`, then run `systemctl enable --now fastrag`.
+A sample unit file lives at `deploy/fastrag.service`. It now expects a
+profile-first config at `/etc/fastrag/fastrag.toml`; define
+`[embedder].default_profile` there (or edit the unit to point at your chosen
+config path). Copy the unit to `/etc/systemd/system/`, create the `fastrag`
+user plus `/var/lib/fastrag/corpus` and `/etc/fastrag/`, install the config,
+then run `systemctl enable --now fastrag`.
 
 ### Docker
 
