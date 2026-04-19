@@ -35,15 +35,21 @@ What fastrag does **not** do:
 │        │         │                                                          │
 │        │         ├─ /etc/fastrag/fastrag.toml (mounted config)              │
 │        │         ├─ embedder profile `vams`                                 │
+│        │         ├─ outbound embed requests ──► ollama (11434)              │
 │        │         └─ /var/lib/fastrag/bundles/<name>/  (mounted volume)      │
 │        │                                                                    │
 │        └──► llama-server (8081/8082) ◄── vetting LLM, unchanged             │
+│                                                                             │
+│   fastrag ──► ollama (11434) ◄── mixedbread embedding model                 │
 │                                                                             │
 │   vams-frontend ──► vams-api                                                │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-Single container, single port exposed. All ML subprocesses live inside the fastrag container and never bind a public port.
+Single HTTP entrypoint, single port exposed from fastrag. In this deployment
+shape the retrieval embedder is **not** an internal fastrag subprocess: fastrag
+calls a separate Ollama service over the compose network, while VAMS vetting
+continues to use its existing llama-server endpoints.
 
 ## Install — Path A: bundled into VAMS docker-compose (default)
 
@@ -52,10 +58,19 @@ Single container, single port exposed. All ML subprocesses live inside the fastr
 Add a `fastrag` service block alongside the existing `vams-api` / `vams-frontend` stanzas in `vams/docker-compose.yml` (the existing env-var style at lines 23–35 is the template to match):
 
 ```yaml
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ${OLLAMA_DATA_DIR:-./ollama-data}:/root/.ollama
+    restart: unless-stopped
+
   fastrag:
     image: fastrag:${FASTRAG_TAG:-latest}
     ports:
       - "${FASTRAG_PORT:-8080}:8080"
+    depends_on:
+      ollama:
+        condition: service_started
     volumes:
       - ${FASTRAG_BUNDLES_DIR:-./bundles}:/var/lib/fastrag/bundles:ro
       - ${FASTRAG_FINDINGS_DIR:-./fastrag-corpora/vams-findings}:/var/lib/fastrag/corpora/vams-findings
@@ -100,7 +115,15 @@ Wire the dependency and URL into `vams-api`:
         condition: service_healthy
 ```
 
-`start_period: 120s` is deliberate: first boot loads two GGUFs (~1 GB combined) before `/ready` flips to 200.
+This example assumes a separate Ollama service named `ollama` on the same
+compose network. Pull the embedding model into that service before first use:
+
+```bash
+docker compose exec ollama ollama pull mixedbread-ai/mxbai-embed-large-v1
+```
+
+`start_period: 120s` is deliberate: first boot may wait on bundle load plus
+Ollama readiness or an initial model pull before `/ready` flips to 200.
 
 Add the profile config alongside `docker-compose.yml`:
 
@@ -203,10 +226,12 @@ An `AsyncFastRAGClient` with the same surface is available for async call sites.
 ```bash
 fastrag index vams-findings.jsonl \
     --corpus /var/lib/fastrag/corpora/vams-findings \
+    --config /etc/fastrag/fastrag.toml \
+    --embedder-profile vams \
     --text-fields title,description,location \
     --id-field finding_id \
     --metadata-fields source_tool,severity,cwe_id,detected_at \
-    --metadata-types severity=enum,cwe_id=int,detected_at=date
+    --metadata-types severity=string,cwe_id=numeric,detected_at=date
 ```
 
 See the complete recipe in [`README.md` lines 448–514](../README.md). Index `vams-findings` to a path **outside** the bundle directory so bundle reloads leave it untouched.
@@ -343,7 +368,7 @@ On 503, `ReadyStatus.reasons` contains one or more of:
 |---|---|
 | `bundle_not_loaded` | Startup still in progress, or initial bundle invalid |
 | `corpus_{name}_missing` | A required corpus (derived from the bundle's `manifest.corpora`) is absent from the loaded bundle |
-| `embedder_unreachable` | Internal `llama-server` embedder subprocess not responding |
+| `embedder_unreachable` | The configured embedder backend (for the VAMS profile, the Ollama endpoint at `base_url`) is not responding |
 | `reranker_unreachable` | Internal `llama-server` reranker subprocess not responding |
 
 ## Environment variable reference
@@ -360,6 +385,7 @@ On 503, `ReadyStatus.reasons` contains one or more of:
 | `FASTRAG_FINDINGS_DIR` | compose host | `./fastrag-corpora/vams-findings` | no | Host directory mounted as the mutable findings corpus |
 | `FASTRAG_CONFIG_PATH` | compose host | `./fastrag.toml` | yes | Host path mounted to `/etc/fastrag/fastrag.toml` |
 | `FASTRAG_BUNDLE_NAME` | compose host | `vams-lookup-v1` | yes | Bundle directory to load |
+| `OLLAMA_DATA_DIR` | compose host | `./ollama-data` | no | Persistent model store for the Ollama service |
 | `PORT` | fastrag container | `8080` | no | Listen port inside the container |
 
 ## Verification checklist

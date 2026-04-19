@@ -199,26 +199,37 @@ FastRAG can build and query a persisted semantic corpus when the `retrieval` fea
 
 ### CLI
 
+These retrieval examples assume the `local-ollama` profile from the
+`fastrag.toml` example below.
+
 ```bash
 # Index a file or directory into a corpus directory
-fastrag index ./documents --corpus ./corpus
+fastrag index ./documents --corpus ./corpus \
+    --config ./fastrag.toml --embedder-profile local-ollama
 
 # Index with run-wide metadata (applied to every file)
 fastrag index ./documents --corpus ./corpus \
+    --config ./fastrag.toml --embedder-profile local-ollama \
     --metadata customer=acme --metadata year=2024
 
 # Query the indexed corpus
-fastrag query "invoice payment terms" --corpus ./corpus --top-k 5
+fastrag query "invoice payment terms" --corpus ./corpus \
+    --config ./fastrag.toml --embedder-profile local-ollama \
+    --top-k 5
 
 # Filter by metadata at query time (AND-combined equality)
 fastrag query "privilege escalation" --corpus ./corpus \
+    --config ./fastrag.toml --embedder-profile local-ollama \
     --filter customer=acme,severity=high
 
 # Show corpus metadata
-fastrag corpus-info --corpus ./corpus
+fastrag corpus-info --corpus ./corpus \
+    --config ./fastrag.toml --embedder-profile local-ollama
 
 # Start the HTTP query server
-fastrag serve-http --corpus ./corpus --port 8081
+fastrag serve-http --corpus ./corpus \
+    --config ./fastrag.toml --embedder-profile local-ollama \
+    --port 8081
 ```
 
 Alongside each input file, an optional `<name>.meta.json` sidecar carrying a flat
@@ -235,6 +246,7 @@ and the index command promotes the named ones to typed values:
 
 ```bash
 fastrag index ./docs --corpus ./corpus \
+    --config ./fastrag.toml --embedder-profile local-ollama \
     --metadata-fields published_date,severity \
     --metadata-types published_date=date,severity=string
 ```
@@ -342,16 +354,24 @@ A cross-encoder model rescores HNSW candidates as a second retrieval stage. Enab
 
 ```bash
 # Query with ONNX reranker (default)
-fastrag query "payment terms" --corpus ./corpus --rerank=onnx
+fastrag query "payment terms" --corpus ./corpus \
+    --config ./fastrag.toml --embedder-profile local-ollama \
+    --rerank=onnx
 
 # Query with llama-cpp reranker
-fastrag query "payment terms" --corpus ./corpus --rerank=llama-cpp
+fastrag query "payment terms" --corpus ./corpus \
+    --config ./fastrag.toml --embedder-profile local-ollama \
+    --rerank=llama-cpp
 
 # Skip reranking
-fastrag query "payment terms" --corpus ./corpus --no-rerank
+fastrag query "payment terms" --corpus ./corpus \
+    --config ./fastrag.toml --embedder-profile local-ollama \
+    --no-rerank
 
 # Adjust over-fetch multiplier (default: 10x)
-fastrag query "payment terms" --corpus ./corpus --rerank-over-fetch 20
+fastrag query "payment terms" --corpus ./corpus \
+    --config ./fastrag.toml --embedder-profile local-ollama \
+    --rerank-over-fetch 20
 ```
 
 | Backend | Model | Size | License | Requirements |
@@ -368,7 +388,9 @@ The HTTP server accepts `?rerank=off` and `?over_fetch=N` query parameters to co
 Opt in to BM25 + dense retrieval fused via Reciprocal Rank Fusion (k=60) with `--hybrid`:
 
 ```bash
-fastrag query "CVE-2024-1234 buffer overflow" --corpus ./corpus --hybrid
+fastrag query "CVE-2024-1234 buffer overflow" --corpus ./corpus \
+    --config ./fastrag.toml --embedder-profile local-ollama \
+    --hybrid
 ```
 
 Dense-only is the default. CVE and CWE identifiers in the query string are extracted and matched exactly against the Tantivy index, with exact hits prepended before the fused results.
@@ -392,6 +414,7 @@ For corpora where freshness matters (security advisories, news, changelogs), lay
 ```bash
 fastrag query "latest openssl advisory" \
     --corpus ./corpus \
+    --config ./fastrag.toml --embedder-profile local-ollama \
     --time-decay-field published_date \
     --time-decay-halflife 30d
 ```
@@ -401,6 +424,7 @@ When documents carry different date fields (e.g. CVE records use `lastModified`,
 ```bash
 fastrag query "recent TLS advisory" \
     --corpus ./corpus \
+    --config ./fastrag.toml --embedder-profile local-ollama \
     --time-decay-field "last_modified,published_date" \
     --time-decay-halflife 30d
 ```
@@ -492,10 +516,11 @@ When `verify` is set, each surviving hit carries `verify_score` (MinHash Jaccard
    ```bash
    fastrag index findings.jsonl \
        --corpus /var/lib/fastrag/vams-findings \
+       --config ./fastrag.toml --embedder-profile local-ollama \
        --text-fields title,description,location \
        --id-field finding_id \
        --metadata-fields source_tool,severity,cwe_id,detected_at \
-       --metadata-types severity=enum,cwe_id=int,detected_at=date
+       --metadata-types severity=string,cwe_id=numeric,detected_at=date
    ```
 
 2. **On every new finding, POST `/similar`** before inserting:
@@ -564,7 +589,9 @@ alone, −67% combined with BM25 + reranker.
 #### Enable
 
 ```bash
-fastrag index ./docs --corpus ./corpus --contextualize
+fastrag index ./docs --corpus ./corpus \
+    --config ./fastrag.toml --embedder-profile local-ollama \
+    --contextualize
 ```
 
 This spawns a second `llama-server` subprocess for the completion model.
@@ -577,7 +604,9 @@ If llama-server hiccups during ingest, a small fraction of chunks may
 fall back to raw text. Repair them with:
 
 ```bash
-fastrag index --corpus ./corpus --contextualize --retry-failed
+fastrag index --corpus ./corpus \
+    --config ./fastrag.toml --embedder-profile local-ollama \
+    --contextualize --retry-failed
 ```
 
 #### Strict mode
@@ -585,7 +614,9 @@ fastrag index --corpus ./corpus --contextualize --retry-failed
 Hard-fail the ingest on any contextualization error:
 
 ```bash
-fastrag index ./docs --corpus ./corpus --contextualize --context-strict
+fastrag index ./docs --corpus ./corpus \
+    --config ./fastrag.toml --embedder-profile local-ollama \
+    --contextualize --context-strict
 ```
 
 ### Security Corpus Hygiene (optional)
@@ -649,8 +680,12 @@ tagged with child CWEs like CWE-564 (Hibernate Injection).
 Override per-query:
 
 ```bash
-fastrag query "sqli patterns" --corpus ./corpus --cwe-expand
-fastrag query "sqli patterns" --corpus ./corpus --no-cwe-expand
+fastrag query "sqli patterns" --corpus ./corpus \
+    --config ./fastrag.toml --embedder-profile local-ollama \
+    --cwe-expand
+fastrag query "sqli patterns" --corpus ./corpus \
+    --config ./fastrag.toml --embedder-profile local-ollama \
+    --no-cwe-expand
 ```
 
 Via HTTP, pass `cwe_expand=true|false` as a query parameter on `/query`,
@@ -770,7 +805,7 @@ The `serve-http` subcommand exposes a small operational surface for production u
 
 ### Incremental indexing
 
-Re-running `fastrag index <root> --corpus <corpus>` efficiently updates the corpus: unchanged files (identified via mtime and size) are skipped, stat-changed files are verified against their blake3 hash before re-embedding, and deleted files are automatically pruned from the index along with their chunks. Each input root maintains independent deletion tracking — removing files from one root doesn't affect others. Old (v1) corpora auto-migrate to schema v2 on first index; the initial run hashes every file once, and subsequent runs are fully incremental.
+Re-running `fastrag index <root> --corpus <corpus> --config <path> --embedder-profile <name>` efficiently updates the corpus: unchanged files (identified via mtime and size) are skipped, stat-changed files are verified against their blake3 hash before re-embedding, and deleted files are automatically pruned from the index along with their chunks. Each input root maintains independent deletion tracking — removing files from one root doesn't affect others. Old (v1) corpora auto-migrate to schema v2 on first index; the initial run hashes every file once, and subsequent runs are fully incremental.
 
 ### Logging
 
