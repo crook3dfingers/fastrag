@@ -821,10 +821,11 @@ Logs go to stdout via `tracing`. Set `FASTRAG_LOG_FORMAT=json` for one-line JSON
 
 A sample unit file lives at `deploy/fastrag.service`. It now expects a
 profile-first config at `/etc/fastrag/fastrag.toml`; define
-`[embedder].default_profile` there (or edit the unit to point at your chosen
-config path). Copy the unit to `/etc/systemd/system/`, create the `fastrag`
-user plus `/var/lib/fastrag/corpus` and `/etc/fastrag/`, install the config,
-then run `systemctl enable --now fastrag`.
+`[embedder].default_profile` there, or add `--embedder-profile <name>` to the
+unit's `ExecStart` when you do not want to rely on a default profile. Copy the
+unit to `/etc/systemd/system/`, create the `fastrag` user plus
+`/var/lib/fastrag/corpus` and `/etc/fastrag/`, install the config, then run
+`systemctl enable --now fastrag`.
 
 ### Docker
 
