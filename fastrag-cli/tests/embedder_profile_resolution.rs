@@ -327,3 +327,13 @@ base_url = "http://localhost:11434"
         "unexpected error: {err}"
     );
 }
+
+#[test]
+fn ollama_base_url_prefers_env_host_when_profile_base_url_missing() {
+    let resolved = fastrag_cli::embed_loader::resolve_ollama_base_url(
+        None,
+        Some("http://ollama.internal:11434"),
+    );
+
+    assert_eq!(resolved, "http://ollama.internal:11434");
+}

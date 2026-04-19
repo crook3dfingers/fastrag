@@ -141,13 +141,20 @@ fn load_openai(profile: &ResolvedEmbedderProfile) -> Result<DynEmbedder, EmbedLo
 fn load_ollama(profile: &ResolvedEmbedderProfile) -> Result<DynEmbedder, EmbedLoaderError> {
     let embedder = OllamaEmbedder::new_with_prefix(
         profile.model.clone(),
-        profile
-            .base_url
-            .clone()
-            .unwrap_or_else(|| DEFAULT_OLLAMA_BASE_URL.to_string()),
+        resolve_ollama_base_url(
+            profile.base_url.as_deref(),
+            std::env::var("OLLAMA_HOST").ok().as_deref(),
+        ),
         prefix_scheme_for_config(&profile.prefix),
     )?;
     Ok(Arc::new(embedder) as Arc<dyn DynEmbedderTrait>)
+}
+
+pub fn resolve_ollama_base_url(profile_base_url: Option<&str>, env_host: Option<&str>) -> String {
+    profile_base_url
+        .or(env_host)
+        .unwrap_or(DEFAULT_OLLAMA_BASE_URL)
+        .to_string()
 }
 
 fn load_llama_cpp(profile: &ResolvedEmbedderProfile) -> Result<DynEmbedder, EmbedLoaderError> {
