@@ -8,6 +8,8 @@ Wants=network-online.target
 Type=simple
 User=fastrag
 Group=fastrag
+# /etc/fastrag/fastrag.toml must define [embedder].default_profile.
+# If you do not use a default profile, add --embedder-profile <name> here.
 ExecStart=/usr/local/bin/fastrag serve-http --corpus /var/lib/fastrag/corpus --config /etc/fastrag/fastrag.toml --port 8081
 Restart=on-failure
 RestartSec=5s
