@@ -90,7 +90,6 @@ Add a `fastrag` service block alongside the existing `vams-api` / `vams-frontend
       - --port
       - "8080"
     environment:
-      BUNDLE_NAME: "${FASTRAG_BUNDLE_NAME:-vams-lookup-v1}"
       FASTRAG_TOKEN: "${FASTRAG_TOKEN:-}"
       FASTRAG_ADMIN_TOKEN: "${FASTRAG_ADMIN_TOKEN:-}"
     restart: unless-stopped
@@ -371,20 +370,30 @@ On 503, `ReadyStatus.reasons` contains one or more of:
 
 ## Environment variable reference
 
+### Path A: direct-binary compose example
+
+These are the host-side variables used by the explicit `command:` compose model
+shown above.
+
 | Variable | Scope | Default | Required | Purpose |
 |---|---|---|---|---|
-| `BUNDLE_NAME` | fastrag container | — | yes | Directory under `/var/lib/fastrag/bundles/` to load at startup |
-| `BUNDLES_DIR` | fastrag container | `/var/lib/fastrag/bundles` | no | Override the bundles root |
 | `FASTRAG_TOKEN` | fastrag + VAMS | — | recommended | Read token for `/query`, `/similar`, `/cwe`, `/metrics` |
 | `FASTRAG_ADMIN_TOKEN` | fastrag + VAMS | — | reload only | Admin token for `POST /admin/reload`; must differ from the read token |
 | `FASTRAG_URL` | VAMS | `http://fastrag:8080` | yes | Where VAMS reaches fastrag |
-| `FASTRAG_PORT` | compose host | `8080` | no | Host-side port mapping |
-| `FASTRAG_BUNDLES_DIR` | compose host | `./bundles` | no | Host directory mounted into the container |
+| `FASTRAG_PORT` | compose host | `8080` | no | Host-side port mapping for the fastrag HTTP service |
+| `FASTRAG_BUNDLES_DIR` | compose host | `./bundles` | no | Host directory mounted to `/var/lib/fastrag/bundles` |
 | `FASTRAG_FINDINGS_DIR` | compose host | `./fastrag-corpora/vams-findings` | no | Host directory mounted as the mutable findings corpus |
 | `FASTRAG_CONFIG_PATH` | compose host | `./fastrag.toml` | yes | Host path mounted to `/etc/fastrag/fastrag.toml` |
-| `FASTRAG_BUNDLE_NAME` | compose host | `vams-lookup-v1` | yes | Bundle directory to load |
+| `FASTRAG_BUNDLE_NAME` | compose host | `vams-lookup-v1` | yes | Bundle directory name interpolated into the explicit `--bundle-path` |
 | `OLLAMA_DATA_DIR` | compose host | `./ollama-data` | no | Persistent model store for the Ollama service |
-| `PORT` | fastrag container | `8080` | no | Listen port inside the container |
+
+### Wrapper-script / airgap model
+
+If you use the separate airgap image or wrapper entrypoint described in
+[`docs/airgap-install.md`](./airgap-install.md), that path also accepts
+container-scoped wrapper variables such as `BUNDLE_NAME`, `BUNDLES_DIR`, and
+`PORT`. Those belong to the wrapper-script deployment model, not the explicit
+`command:` compose example above.
 
 ## Verification checklist
 

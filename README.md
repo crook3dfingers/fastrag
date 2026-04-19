@@ -535,7 +535,7 @@ When `verify` is set, each surviving hit carries `verify_score` (MinHash Jaccard
      "max_results": 5,
      "corpus": "vams-findings",
      "filter": "severity in (HIGH, CRITICAL)",
-     "fields": "include:finding_id,source_tool,detected_at"
+     "fields": "finding_id,source_tool,detected_at"
    }
    ```
 
