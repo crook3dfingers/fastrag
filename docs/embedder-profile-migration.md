@@ -9,6 +9,7 @@ simple: define the backend once, then select it with `--embedder-profile`.
 | Old surface | Use now |
 |---|---|
 | `--embedder bge` | Define a BGE profile and run with `--embedder-profile <name>` |
+| `--model-path <path>` | Define a `backend = "llama-cpp"` profile whose configured model resolves to that GGUF |
 | `--embedder openai` | Define an OpenAI profile with `model = "text-embedding-3-small"` or `"text-embedding-3-large"` |
 | `--embedder ollama --ollama-model <model>` | Define an Ollama profile with `backend = "ollama"` and `model = "<model>"` |
 | `--ollama-url <url>` as the primary setup path | Put `base_url = "<url>"` in the selected Ollama profile |
