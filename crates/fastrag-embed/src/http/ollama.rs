@@ -49,31 +49,6 @@ impl OllamaEmbedder {
         })
     }
 
-    /// Test helper — skip dim probe.
-    pub fn from_parts(base_url: String, model: String, dim: usize) -> Self {
-        Self::from_parts_with_prefix(base_url, model, dim, "", "")
-    }
-
-    /// Test helper — skip dim probe and configure explicit prefixes.
-    pub fn from_parts_with_prefix(
-        base_url: String,
-        model: String,
-        dim: usize,
-        query_prefix: &str,
-        passage_prefix: &str,
-    ) -> Self {
-        Self {
-            base_url,
-            model,
-            dim,
-            prefix_scheme: PrefixScheme::new(
-                Box::leak(query_prefix.to_string().into_boxed_str()),
-                Box::leak(passage_prefix.to_string().into_boxed_str()),
-            ),
-            client: build_client().expect("reqwest client"),
-        }
-    }
-
     pub fn runtime_identity(&self) -> EmbedderIdentity {
         EmbedderIdentity {
             model_id: format!("ollama:{}", self.model),
@@ -140,6 +115,34 @@ impl OllamaEmbedder {
             out.push(parsed.embedding);
         }
         Ok(out)
+    }
+}
+
+#[cfg(test)]
+impl OllamaEmbedder {
+    /// Test helper — skip dim probe.
+    pub fn from_parts(base_url: String, model: String, dim: usize) -> Self {
+        Self::from_parts_with_prefix(base_url, model, dim, "", "")
+    }
+
+    /// Test helper — skip dim probe and configure explicit prefixes.
+    pub fn from_parts_with_prefix(
+        base_url: String,
+        model: String,
+        dim: usize,
+        query_prefix: &str,
+        passage_prefix: &str,
+    ) -> Self {
+        Self {
+            base_url,
+            model,
+            dim,
+            prefix_scheme: PrefixScheme::new(
+                Box::leak(query_prefix.to_string().into_boxed_str()),
+                Box::leak(passage_prefix.to_string().into_boxed_str()),
+            ),
+            client: build_client().expect("reqwest client"),
+        }
     }
 }
 
