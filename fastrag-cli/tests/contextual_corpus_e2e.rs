@@ -117,7 +117,6 @@ fn contextualization_enables_pronoun_resolution() {
             config_path.to_str().unwrap(),
             "--top-k",
             "1",
-            "--dense-only",
             "--no-rerank",
         ])
         .output()
@@ -137,7 +136,6 @@ fn contextualization_enables_pronoun_resolution() {
             config_path.to_str().unwrap(),
             "--top-k",
             "1",
-            "--dense-only",
             "--no-rerank",
         ])
         .output()

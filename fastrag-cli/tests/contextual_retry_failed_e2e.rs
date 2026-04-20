@@ -131,7 +131,6 @@ fn retry_failed_repairs_all_transient_failures() {
             config_path.to_str().unwrap(),
             "--top-k",
             "1",
-            "--dense-only",
             "--no-rerank",
         ])
         .output()

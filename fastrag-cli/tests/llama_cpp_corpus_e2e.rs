@@ -12,7 +12,7 @@ use assert_cmd::Command;
 use tempfile::tempdir;
 
 /// Index two tiny documents with `--backend qwen3-q8`, then query and verify
-/// the top-1 hit is semantically correct + manifest v3 fields are right.
+/// the top-1 hit is semantically correct + manifest fields are right.
 #[test]
 #[ignore]
 fn qwen3_index_query_round_trip() {

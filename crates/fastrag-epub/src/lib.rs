@@ -105,12 +105,12 @@ fn read_container_xml(
     loop {
         match reader.read_event() {
             Ok(quick_xml::events::Event::Empty(ref e))
-            | Ok(quick_xml::events::Event::Start(ref e)) => {
-                if e.local_name().as_ref() == b"rootfile" {
-                    for attr in e.attributes().flatten() {
-                        if attr.key.as_ref() == b"full-path" {
-                            return Ok(String::from_utf8_lossy(&attr.value).to_string());
-                        }
+            | Ok(quick_xml::events::Event::Start(ref e))
+                if e.local_name().as_ref() == b"rootfile" =>
+            {
+                for attr in e.attributes().flatten() {
+                    if attr.key.as_ref() == b"full-path" {
+                        return Ok(String::from_utf8_lossy(&attr.value).to_string());
                     }
                 }
             }
