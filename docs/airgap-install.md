@@ -2,6 +2,12 @@
 
 The DVD contains the fastrag Docker image, a sample bundle, and this README. The operator flow:
 
+If you are rebuilding the standard FastRAG image in a TLS-inspected enterprise
+network before producing the DVD payload, place the operator root CA at
+`enterprise-certs/ca-bundle.crt` in the repo before `docker build`. The
+standard Dockerfile now installs that optional CA into the build container so
+`apt`, Cargo, and git-backed fetches trust the same root bundle.
+
 ## 1. Mount the disc
 
 ```bash
