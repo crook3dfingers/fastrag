@@ -16,7 +16,7 @@
 # -----------------------------------------------------------------------------
 # 1. Rust builder
 # -----------------------------------------------------------------------------
-FROM rust:1.89-trixie AS rust-builder
+FROM public.ecr.aws/docker/library/rust:1.89-trixie AS rust-builder
 WORKDIR /build
 RUN apt-get update && apt-get install -y --no-install-recommends \
         pkg-config libssl-dev ca-certificates build-essential cmake git \
@@ -37,7 +37,7 @@ RUN mkdir -p /out/lib && \
 # -----------------------------------------------------------------------------
 # 2. llama.cpp builder (produces llama-server)
 # -----------------------------------------------------------------------------
-FROM debian:trixie-slim AS llama-builder
+FROM public.ecr.aws/docker/library/debian:trixie-slim AS llama-builder
 ARG LLAMA_CPP_REF=b8739
 RUN apt-get update && apt-get install -y --no-install-recommends \
         git cmake build-essential ca-certificates curl libcurl4-openssl-dev \
@@ -59,7 +59,7 @@ RUN git clone --filter=blob:none --branch ${LLAMA_CPP_REF} \
 # -----------------------------------------------------------------------------
 # 3. Runtime image
 # -----------------------------------------------------------------------------
-FROM debian:trixie-slim
+FROM public.ecr.aws/docker/library/debian:trixie-slim
 
 ARG EMBED_GGUF_URL=https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-Q8_0.gguf
 ARG RERANK_GGUF_URL=https://huggingface.co/klnstpr/bge-reranker-v2-m3-Q8_0-GGUF/resolve/main/bge-reranker-v2-m3-q8_0.gguf
