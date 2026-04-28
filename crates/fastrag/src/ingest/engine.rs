@@ -108,6 +108,29 @@ pub fn index_jsonl(
 
     let source_path = input.to_string_lossy().into_owned();
 
+    // Buffer chunks across records and flush in batches. Each
+    // `Store::add_records` call does one Tantivy commit + reload; per-record
+    // commits dominate wall time on cold rebuilds (see fastrag perf issue).
+    // Flush every FASTRAG_INGEST_FLUSH_RECORDS records (default 500).
+    let flush_threshold: usize = std::env::var("FASTRAG_INGEST_FLUSH_RECORDS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(500);
+
+    let mut pending: Vec<ChunkRecord> = Vec::new();
+    let mut pending_records: usize = 0;
+
+    let flush = |store: &mut fastrag_store::Store,
+                 pending: &mut Vec<ChunkRecord>|
+     -> Result<(), IngestError> {
+        if pending.is_empty() {
+            return Ok(());
+        }
+        store.add_records(std::mem::take(pending))?;
+        Ok(())
+    };
+
     for record in &records {
         let existing_hash = store.content_hash_for(&record.external_id)?;
         match existing_hash.as_deref() {
@@ -116,6 +139,10 @@ pub fn index_jsonl(
                 continue;
             }
             Some(_) => {
+                // Flush any pending adds before a delete to keep Tantivy
+                // and HNSW state consistent across the upsert.
+                flush(&mut store, &mut pending)?;
+                pending_records = 0;
                 store.delete_by_external_id(&record.external_id)?;
                 stats.records_upserted += 1;
             }
@@ -135,37 +162,39 @@ pub fn index_jsonl(
             continue;
         }
 
-        // Embed all chunks in a batch
+        // Embed all chunks of this record in a batch
         let passages: Vec<PassageText> = chunks.iter().map(|c| PassageText::new(&c.text)).collect();
 
         let vectors = embedder
             .embed_passage_dyn(&passages)
             .map_err(|e| IngestError::Embed(e.to_string()))?;
 
-        let chunk_records: Vec<ChunkRecord> = chunks
-            .iter()
-            .zip(vectors.into_iter())
-            .enumerate()
-            .map(|(i, (chunk, vector))| {
-                let id = id_counter;
-                id_counter = id_counter.wrapping_add(1);
-                ChunkRecord {
-                    id,
-                    external_id: record.external_id.clone(),
-                    content_hash: record.content_hash.clone(),
-                    chunk_index: i,
-                    source_path: source_path.clone(),
-                    source_json: Some(record.source_json.clone()),
-                    chunk_text: chunk.text.clone(),
-                    vector,
-                    user_fields: record.metadata.clone(),
-                }
-            })
-            .collect();
+        for (i, (chunk, vector)) in chunks.iter().zip(vectors.into_iter()).enumerate() {
+            let id = id_counter;
+            id_counter = id_counter.wrapping_add(1);
+            pending.push(ChunkRecord {
+                id,
+                external_id: record.external_id.clone(),
+                content_hash: record.content_hash.clone(),
+                chunk_index: i,
+                source_path: source_path.clone(),
+                source_json: Some(record.source_json.clone()),
+                chunk_text: chunk.text.clone(),
+                vector,
+                user_fields: record.metadata.clone(),
+            });
+            stats.chunks_created += 1;
+        }
+        pending_records += 1;
 
-        stats.chunks_created += chunk_records.len();
-        store.add_records(chunk_records)?;
+        if pending_records >= flush_threshold {
+            flush(&mut store, &mut pending)?;
+            pending_records = 0;
+        }
     }
+
+    // Final flush of any remaining buffered records.
+    flush(&mut store, &mut pending)?;
 
     // 5. Save HNSW index
     store.save()?;

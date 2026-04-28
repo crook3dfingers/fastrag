@@ -1071,6 +1071,18 @@ fn index_store_path_inner(
     let mut chunks_added: usize = 0;
     let mut chunks_removed: usize = 0;
 
+    // Buffer chunks across files and flush in batches. Each
+    // `Store::add_records` call does one Tantivy commit + reload; per-file
+    // commits dominate wall time on cold rebuilds. Flush every
+    // FASTRAG_INGEST_FLUSH_RECORDS records (default 500).
+    let flush_threshold: usize = std::env::var("FASTRAG_INGEST_FLUSH_RECORDS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(500);
+    let mut pending: Vec<ChunkRecord> = Vec::new();
+    let mut pending_files: usize = 0;
+
     for wf in &walked {
         let external_id = wf.rel_path.to_string_lossy().into_owned();
         let content_hash = fastrag_index::hash::hash_file(&wf.abs_path)?;
@@ -1081,6 +1093,12 @@ fn index_store_path_inner(
                 continue;
             }
             Some(_) => {
+                // Flush any pending adds before a delete to keep Tantivy
+                // and HNSW state consistent across the upsert.
+                if !pending.is_empty() {
+                    store.add_records(std::mem::take(&mut pending))?;
+                    pending_files = 0;
+                }
                 let removed = store.delete_by_external_id(&external_id)?;
                 chunks_removed += removed.len();
                 files_changed += 1;
@@ -1186,8 +1204,19 @@ fn index_store_path_inner(
                 .collect();
 
             chunks_added += records.len();
-            store.add_records(records)?;
+            pending.extend(records);
         }
+        pending_files += 1;
+
+        if pending_files >= flush_threshold {
+            store.add_records(std::mem::take(&mut pending))?;
+            pending_files = 0;
+        }
+    }
+
+    // Final flush of any remaining buffered records.
+    if !pending.is_empty() {
+        store.add_records(std::mem::take(&mut pending))?;
     }
 
     // Stamp contextualizer provenance on the manifest if any ran.
