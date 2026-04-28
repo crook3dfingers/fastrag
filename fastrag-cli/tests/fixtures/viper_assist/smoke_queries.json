@@ -1,0 +1,43 @@
+{
+  "_doc": "Smoke queries for the VIPER Assist profile. Each query asserts that at least one expected_ids entry appears in the top_k results. Sourced from issue #74. Query 5 (Jenkins/Artifactory) from the issue is omitted because the current VIPER corpus producer does not yet emit CI/CD-platform rows; track that in VIPER_Dashboard corpus producer issues, not here.",
+  "top_k": 5,
+  "queries": [
+    {
+      "name": "ad_smb_ldap_kerberos_winrm",
+      "query": "I found SMB, LDAP, Kerberos, and WinRM open on a Windows server. What should I look at first?",
+      "expected_ids_any_of": [
+        "engagements-active-directory:ad-attack-chain",
+        "playbooks-active-directory:overview",
+        "playbooks-active-directory:phase-1-unauthenticated-enumeration",
+        "engagements-active-directory:key-ad-attack-techniques"
+      ]
+    },
+    {
+      "name": "web_app_no_creds",
+      "query": "I only have a web app URL and no credentials. What VIPER pages should I start with?",
+      "expected_ids_any_of": [
+        "engagements-web-application:testing-phases",
+        "playbooks-web-application:overview",
+        "playbooks-web-application:phase-1-reconnaissance-and-fingerprinting"
+      ]
+    },
+    {
+      "name": "nmap_common_ports",
+      "query": "Nmap shows 22, 80, 443, and 8080. I am not sure what tool to use next.",
+      "expected_ids_any_of": [
+        "playbooks-network-reconnaissance:phase-5-attack-surface-probing",
+        "playbooks-network-reconnaissance:phase-3-open-technical-databases",
+        "playbooks-web-application:phase-1-reconnaissance-and-fingerprinting"
+      ]
+    },
+    {
+      "name": "domain_creds_no_admin",
+      "query": "I have domain credentials but no admin rights. What should I enumerate safely first?",
+      "expected_ids_any_of": [
+        "playbooks-active-directory:phase-2-authenticated-enumeration",
+        "playbooks-active-directory:phase-3-credential-attacks",
+        "playbooks-active-directory:overview"
+      ]
+    }
+  ]
+}

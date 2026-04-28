@@ -99,6 +99,7 @@ impl ModelDownloader for HfHubDownloader {
 
         let api = hf_hub::api::sync::ApiBuilder::new()
             .with_cache_dir(hf_cache)
+            .with_token(std::env::var("HF_TOKEN").ok())
             .build()
             .map_err(|e| EmbedError::HfHub(e.to_string()))?;
         let src = api.model(repo.to_string()).get(file)?;

@@ -233,6 +233,9 @@ async fn main() {
                             args::IngestPresetArg::TarmoFinding => {
                                 fastrag::ingest::presets::tarmo_finding_preset()
                             }
+                            args::IngestPresetArg::ViperAssist => {
+                                fastrag::ingest::presets::viper_assist_preset()
+                            }
                         });
                         let config = fastrag::ingest::jsonl::JsonlIngestConfig {
                             text_fields: text_fields.unwrap_or_else(|| {

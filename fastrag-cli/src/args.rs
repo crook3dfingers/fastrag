@@ -56,6 +56,7 @@ pub enum RerankerKindArg {
 #[derive(Clone, Copy, ValueEnum, PartialEq, Eq, Debug)]
 pub enum IngestPresetArg {
     TarmoFinding,
+    ViperAssist,
 }
 
 #[cfg(feature = "retrieval")]
