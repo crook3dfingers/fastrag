@@ -99,6 +99,9 @@ fn viper_assist_smoke_queries_return_relevant_pages() {
     let mut failures = Vec::new();
 
     for q in &smoke.queries {
+        // --no-rerank: smoke exercises embedder+preset+filter quality only;
+        // reranker tuning is out of scope for #74 and would couple the
+        // smoke to HuggingFace network access.
         let out = Command::cargo_bin("fastrag")
             .unwrap()
             .args([

@@ -120,6 +120,7 @@ impl OnnxModelDownloader for HfHubOnnxDownloader {
 
         let api = hf_hub::api::sync::ApiBuilder::new()
             .with_cache_dir(cache_dir)
+            .with_token(std::env::var("HF_TOKEN").ok())
             .build()
             .map_err(|e| RerankError::Model(format!("hf-hub API: {e}")))?;
 
