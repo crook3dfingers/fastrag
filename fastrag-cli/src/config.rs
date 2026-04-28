@@ -161,12 +161,59 @@ impl AppConfig {
 }
 
 pub fn catalog_prefix_defaults(model: &str, enabled: bool) -> PrefixConfig {
-    if enabled && model == "mixedbread-ai/mxbai-embed-large-v1" {
-        PrefixConfig {
+    if !enabled {
+        return PrefixConfig::default();
+    }
+    match model {
+        "mixedbread-ai/mxbai-embed-large-v1" => PrefixConfig {
             query: "Represent this sentence for searching relevant passages: ".to_string(),
             passage: String::new(),
-        }
-    } else {
-        PrefixConfig::default()
+        },
+        "nomic-ai/nomic-embed-text-v1.5" | "nomic-embed-text" => PrefixConfig {
+            query: "search_query: ".to_string(),
+            passage: "search_document: ".to_string(),
+        },
+        _ => PrefixConfig::default(),
+    }
+}
+
+#[cfg(test)]
+mod catalog_defaults_tests {
+    use super::*;
+
+    #[test]
+    fn mxbai_unchanged_when_enabled() {
+        let cfg = catalog_prefix_defaults("mixedbread-ai/mxbai-embed-large-v1", true);
+        assert_eq!(
+            cfg.query,
+            "Represent this sentence for searching relevant passages: "
+        );
+        assert_eq!(cfg.passage, "");
+    }
+
+    #[test]
+    fn nomic_v15_full_name_gets_asymmetric_prefixes() {
+        let cfg = catalog_prefix_defaults("nomic-ai/nomic-embed-text-v1.5", true);
+        assert_eq!(cfg.query, "search_query: ");
+        assert_eq!(cfg.passage, "search_document: ");
+    }
+
+    #[test]
+    fn nomic_short_alias_gets_asymmetric_prefixes() {
+        let cfg = catalog_prefix_defaults("nomic-embed-text", true);
+        assert_eq!(cfg.query, "search_query: ");
+        assert_eq!(cfg.passage, "search_document: ");
+    }
+
+    #[test]
+    fn nomic_returns_default_when_catalog_disabled() {
+        let cfg = catalog_prefix_defaults("nomic-ai/nomic-embed-text-v1.5", false);
+        assert_eq!(cfg, PrefixConfig::default());
+    }
+
+    #[test]
+    fn unknown_model_returns_default() {
+        let cfg = catalog_prefix_defaults("totally-unknown/embedder", true);
+        assert_eq!(cfg, PrefixConfig::default());
     }
 }
