@@ -150,17 +150,39 @@ fn load_llama_cpp(profile: &ResolvedEmbedderProfile) -> Result<DynEmbedder, Embe
         return Err(EmbedLoaderError::UnsupportedModelPath(model_path));
     }
 
+    // Bump physical + logical batch from llama.cpp's 512 default. Embedder
+    // chunks can exceed 512 tokens (e.g. VIPER playbook sections at 1k chars
+    // tokenize to 540+ tokens with Nomic), and llama-server returns HTTP 500
+    // "input is too large to process. increase the physical batch size" if
+    // any single input exceeds --ubatch. 4096 fits Nomic v1.5 (8192 ctx) and
+    // is harmless for smaller-context embedders (batch caps compute size,
+    // not max input length — the model arch still gates that).
+    //
+    // GPU offload: opt-in via FASTRAG_LLAMA_NGL (default unset = CPU). Set
+    // to 999 for full offload. CPU-only stays the default so deployments
+    // without a GPU don't fail on a missing CUDA/Vulkan backend.
+    let mut extra_args = vec![
+        "--model".to_string(),
+        profile.model.clone(),
+        "--embedding".to_string(),
+        "--pooling".to_string(),
+        "mean".to_string(),
+        "-ub".to_string(),
+        "4096".to_string(),
+        "-b".to_string(),
+        "4096".to_string(),
+    ];
+    if let Ok(ngl) = std::env::var("FASTRAG_LLAMA_NGL") {
+        if !ngl.is_empty() {
+            extra_args.push("-ngl".to_string());
+            extra_args.push(ngl);
+        }
+    }
     let cfg = LlamaServerConfig {
         binary_path: find_llama_server()?,
         port: free_port()?,
         health_timeout: std::time::Duration::from_secs(120),
-        extra_args: vec![
-            "--model".to_string(),
-            profile.model.clone(),
-            "--embedding".to_string(),
-            "--pooling".to_string(),
-            "mean".to_string(),
-        ],
+        extra_args,
         skip_version_check: false,
     };
 
