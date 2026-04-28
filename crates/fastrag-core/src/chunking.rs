@@ -225,7 +225,13 @@ fn apply_overlap(chunks: &mut [Chunk], overlap: usize) {
     for i in 1..chunks.len() {
         let prev_text = chunks[i - 1].text.clone();
         let overlap_len = overlap.min(prev_text.len());
-        let overlap_text = &prev_text[prev_text.len() - overlap_len..];
+        // Walk backward to a char boundary so we don't slice through a
+        // multi-byte UTF-8 codepoint (e.g. em-dashes in VIPER playbooks).
+        let mut start = prev_text.len() - overlap_len;
+        while start > 0 && !prev_text.is_char_boundary(start) {
+            start -= 1;
+        }
+        let overlap_text = &prev_text[start..];
         chunks[i].text = format!("{}{}", overlap_text, chunks[i].text);
         chunks[i].char_count = chunks[i].text.len();
     }
@@ -993,6 +999,25 @@ mod tests {
             chunk0_last3,
             &chunks[1].text
         );
+    }
+
+    #[test]
+    fn overlap_does_not_panic_on_multibyte_utf8() {
+        // Em-dash (─, 3 bytes) at the would-be slice boundary used to panic
+        // with "byte index N is not a char boundary". Regression for
+        // VIPER Assist corpus indexing.
+        let text = "abcdefghij─klmnopqrstuv─wxyz1234567890─end";
+        let doc = doc_with(vec![Element::new(ElementKind::Paragraph, text)]);
+        let chunks = doc.chunk(&ChunkingStrategy::RecursiveCharacter {
+            max_characters: 12,
+            overlap: 5,
+            separators: default_separators(),
+        });
+        assert!(chunks.len() >= 2, "need overlap to exercise the path");
+        for c in &chunks {
+            assert!(c.text.is_char_boundary(0));
+            assert!(c.text.is_char_boundary(c.text.len()));
+        }
     }
 
     #[test]
